@@ -85,7 +85,9 @@ A few smaller things: the SDK supports server-directed rotation of the
 trusted key it ships with, keeps one random installation ID on disk, and
 clamps whatever custom attributes you attach so they can't balloon a
 check-in past what Barrel will accept. Debug logging goes through `print`
-and is off unless you ask for it with `InitConfig(debug: true)`.
+and is off unless you ask for it with `InitConfig(debug: true)`. An
+unexpected bug in this SDK's own adapter code is tallied locally by cause,
+never captured or sent anywhere, so one can never crash your app.
 
 ## What stays yours
 

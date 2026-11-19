@@ -40,4 +40,22 @@ import Testing
     #expect(state == .checking)
     #expect(occurrenceCount == 1)
   }
+
+  @Test @MainActor func downloadUpdateBeforeAvailableRecordsAnInternalDefectInsteadOfCrashing() {
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+    let before = InternalDefects.counts(for: "adapter:download-before-available")
+
+    adapter.downloadUpdate()
+
+    #expect(InternalDefects.counts(for: "adapter:download-before-available") == before + 1)
+  }
+
+  @Test @MainActor func quitAndInstallBeforeDownloadedRecordsAnInternalDefectInsteadOfCrashing() {
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+    let before = InternalDefects.counts(for: "adapter:install-before-downloaded")
+
+    adapter.quitAndInstall()
+
+    #expect(InternalDefects.counts(for: "adapter:install-before-downloaded") == before + 1)
+  }
 }
