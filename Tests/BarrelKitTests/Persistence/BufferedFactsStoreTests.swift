@@ -1,0 +1,65 @@
+import Testing
+
+@testable import BarrelKit
+
+@Suite struct BufferedFactsStoreTests {
+  @Test func mergesARepeatedAdapterStateInsteadOfAppending() async {
+    let store = BufferedFactsStore()
+    await store.recordAdapterState(.checking)
+    await store.recordAdapterState(.checking)
+    let snapshot = await store.snapshot()
+    #expect(snapshot.count == 1)
+    #expect(snapshot[0].occurrenceCount == 2)
+  }
+
+  @Test func distinctAdapterStatesEachGetTheirOwnEntry() async {
+    let store = BufferedFactsStore()
+    await store.recordAdapterState(.checking)
+    await store.recordAdapterState(.available(releaseNotes: nil))
+    let snapshot = await store.snapshot()
+    #expect(snapshot.count == 2)
+  }
+
+  @Test func clearOnlyRemovesExactlyTheSentSnapshot() async {
+    let store = BufferedFactsStore()
+    await store.recordAdapterState(.checking)
+    let sent = await store.snapshot()
+    await store.recordAdapterState(.available(releaseNotes: nil))  // recorded after the snapshot was taken
+    await store.clear(sent: sent)
+
+    let remaining = await store.snapshot()
+    #expect(remaining.count == 1)
+    #expect(remaining[0] != sent[0])
+  }
+
+  @Test func aFullBufferOfTerminalFactsIsNeverDisplacedByAnIntermediateOne() async {
+    let store = BufferedFactsStore()
+    // Fill the buffer with 32 distinct terminal ("failed") facts -- each
+    // discriminated by a unique platformCode, so none merge.
+    for i in 0..<32 {
+      await store.recordAdapterState(.failed(category: .updater, code: .unknown, platformCode: "code-\(i)"))
+    }
+    #expect(await store.snapshot().count == 32)
+
+    // An incoming intermediate ("checking") fact must be dropped, not evict a terminal one.
+    await store.recordAdapterState(.checking)
+    let snapshot = await store.snapshot()
+    #expect(snapshot.count == 32)
+    #expect(!snapshot.contains { if case .adapterState(.checking, _, _, _) = $0 { return true }; return false })
+  }
+
+  @Test func anIntermediateFactIsEvictedToMakeRoomForAnotherIntermediateFact() async {
+    let store = BufferedFactsStore()
+    await store.recordAdapterState(.checking)
+    for i in 1..<32 {
+      await store.recordAdapterState(.failed(category: .updater, code: .unknown, platformCode: "code-\(i)"))
+    }
+    #expect(await store.snapshot().count == 32)
+
+    await store.recordAdapterState(.available(releaseNotes: nil))
+    let snapshot = await store.snapshot()
+    #expect(snapshot.count == 32)
+    #expect(!snapshot.contains { if case .adapterState(.checking, _, _, _) = $0 { return true }; return false })
+    #expect(snapshot.contains { if case .adapterState(.available(releaseNotes: nil), _, _, _) = $0 { return true }; return false })
+  }
+}
