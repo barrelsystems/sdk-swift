@@ -47,12 +47,20 @@ public final class SparkleUpdaterAdapter: NSObject {
   }
 
   public func downloadUpdate() {
-    pendingUpdateReply?(.install)
+    guard let reply = pendingUpdateReply else {
+      InternalDefects.record("adapter:download-before-available")
+      return
+    }
+    reply(.install)
     pendingUpdateReply = nil
   }
 
   public func quitAndInstall() {
-    pendingInstallReply?(.install)
+    guard let reply = pendingInstallReply else {
+      InternalDefects.record("adapter:install-before-downloaded")
+      return
+    }
+    reply(.install)
     pendingInstallReply = nil
   }
 
