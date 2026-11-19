@@ -1,0 +1,6 @@
+.DS_Store
+/.build
+/Examples/*/.build
+/Examples/*/Package.resolved
+.swiftpm
+.netrc

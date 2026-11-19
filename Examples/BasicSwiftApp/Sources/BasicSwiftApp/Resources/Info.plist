@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Barrel SDK Example</string>
+  <key>CFBundleIdentifier</key>
+  <string>codes.barrel.sdk-swift.example</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>LSUIElement</key>
+  <false/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <!-- Test-only keypair, fixed and checked in (not production). Sparkle
+       requires a genuinely signed feed even for local testing. -->
+  <key>SUPublicEDKey</key>
+  <string>OCE+LMNR3o6eLuQE6dRBhdUhamxwGtSq413MFNHssHI=</string>
+  <key>SURequireSignedFeed</key>
+  <true/>
+  <!-- SPUUpdater.start() throws if SURequireSignedFeed is set without
+       this -- Sparkle enforces the pairing at startup. -->
+  <key>SUVerifyUpdateBeforeExtraction</key>
+  <true/>
+</dict>
+</plist>
