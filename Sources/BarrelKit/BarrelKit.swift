@@ -114,10 +114,12 @@ public final class BarrelKit {
     }
   }
 
+  /// A silent no-op if the adapter isn't currently `available`.
   public func downloadUpdate() {
     Task { await hostControl?.downloadUpdate() }
   }
 
+  /// A silent no-op if the adapter hasn't finished `downloaded`-ing yet.
   public func applyUpdate() {
     Task { await hostControl?.applyUpdate() }
   }

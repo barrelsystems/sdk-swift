@@ -1,3 +1,4 @@
+import Sparkle
 import Testing
 
 @testable import BarrelKit
@@ -57,5 +58,57 @@ import Testing
     adapter.quitAndInstall()
 
     #expect(InternalDefects.counts(for: "adapter:install-before-downloaded") == before + 1)
+  }
+
+  // Spec: a fresh process start (e.g. after a crash) must still be able to
+  // answer `getLastUpdateError()` from the buffered-fact store, not just
+  // from an in-memory `lastError` that a real check-in hasn't set yet.
+  @Test @MainActor func getLastUpdateErrorFallsBackToTheMostRecentBufferedUpdateErrorFact() async {
+    let store = BufferedFactsStore()
+    await store.recordUpdateError(
+      UpdateFailure(
+        phase: .download, failureMode: .downloadTransportFailed, title: "stale title",
+        platform: "sparkle", platformCode: "SUDownloadError"))
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: store)
+
+    var lastError: UpdateFailure?
+    for _ in 0..<50 {
+      lastError = adapter.getLastUpdateError()
+      if lastError != nil { break }
+      await Task.yield()
+    }
+
+    #expect(lastError?.phase == .download)
+    #expect(lastError?.failureMode == .downloadTransportFailed)
+    #expect(lastError?.platformCode == "SUDownloadError")
+    #expect(lastError?.title == resolveFailureTitle(.downloadTransportFailed))
+  }
+
+  // Spec: extraction has no separate `AdapterState` bucket -- the state
+  // stays `.downloading` and its `progress` is never repurposed for the
+  // extraction callback's own progress argument.
+  @Test @MainActor func showExtractionReceivedProgressDoesNotOverwriteAnAlreadySetDownloadProgress() {
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+    adapter.showDownloadDidReceiveExpectedContentLength(100)
+    adapter.showDownloadDidReceiveData(ofLength: 40)
+
+    adapter.showExtractionReceivedProgress(0.9)
+
+    #expect(adapter.getAdapterState() == .downloading(progress: 40))
+  }
+
+  // Spec: Sparkle delivers a release-notes-download failure via this
+  // dedicated callback, not via `showUpdaterError` -- it must still reach
+  // the adapter's own error-recording path.
+  @Test @MainActor func showUpdateReleaseNotesFailedToDownloadWithErrorRecordsAReleaseNotesFailure() {
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+    let error = NSError(domain: "SUSparkleErrorDomain", code: Int(SUError.releaseNotesError.rawValue))
+
+    adapter.showUpdateReleaseNotesFailedToDownloadWithError(error)
+
+    let failure = adapter.getLastUpdateError()
+    #expect(failure?.phase == .check)
+    #expect(failure?.failureMode == .releaseNotesFailed)
+    #expect(failure?.platformCode == "SUReleaseNotesError")
   }
 }

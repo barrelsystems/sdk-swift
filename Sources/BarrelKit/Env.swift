@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(AppKit)
-import AppKit
-#endif
 
 struct ObservedEnvironment {
   var observedVersion: String
@@ -15,9 +12,9 @@ func collectEnvironment() -> ObservedEnvironment {
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
   let os = ProcessInfo.processInfo.operatingSystemVersion
   #if arch(arm64)
-  let arch = "arm64"
+    let arch = "arm64"
   #else
-  let arch = "x64"
+    let arch = "x64"
   #endif
 
   return ObservedEnvironment(

@@ -47,7 +47,8 @@ func sendCheckIn(_ params: CheckInParams) async -> CheckInResponse? {
     bufferedFacts: params.bufferedFacts.map(toWireBufferedFact)
   )
 
-  return await postToBarrel(
-    baseURL: params.baseURL, path: "check-in", credential: params.credential, body: body,
-    label: "check-in", log: params.log)
+  return await postProtocolRequest(
+    PostProtocolRequestParams(
+      baseURL: params.baseURL, path: "check-in", credential: params.credential, body: body,
+      label: "check-in", log: params.log))
 }

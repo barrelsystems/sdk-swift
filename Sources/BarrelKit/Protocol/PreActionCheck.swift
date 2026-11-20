@@ -28,9 +28,10 @@ func checkPreAction(_ params: PreActionCheckParams) async -> Policy? {
     protocolVersion: protocolVersion, installationId: params.installationId, stage: params.stage.rawValue)
 
   guard
-    let parsed = await postToBarrel(
-      baseURL: params.baseURL, path: "pre-action-check", credential: params.credential, body: body,
-      label: "pre-action-check", log: params.log, session: params.session)
+    let parsed = await postProtocolRequest(
+      PostProtocolRequestParams(
+        baseURL: params.baseURL, path: "pre-action-check", credential: params.credential, body: body,
+        label: "pre-action-check", log: params.log, session: params.session))
   else { return nil }
 
   return verifyAndParsePolicy(parsed, publicKeyPEM: params.trustedKeyPEM)

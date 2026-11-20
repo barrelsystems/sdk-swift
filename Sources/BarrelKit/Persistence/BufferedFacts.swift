@@ -77,7 +77,8 @@ private struct Classification {
 private func classify(_ fact: BufferedFact) -> Classification {
   switch fact {
   case .updateError(let failure, _, _, _):
-    return Classification(discriminant: "updateError:\(failure.failureMode.rawValue):\(failure.platformCode)", priority: 1)
+    return Classification(
+      discriminant: "updateError:\(failure.failureMode.rawValue):\(failure.platformCode)", priority: 1)
   case .adapterState(let state, _, _, _):
     if case .failed(_, let code, let platformCode) = state {
       return Classification(discriminant: "adapterState:failed:\(code.rawValue):\(platformCode)", priority: 1)
@@ -147,7 +148,8 @@ actor BufferedFactsStore {
     let classification = classify(candidate)
     if let existingIndex = buffer.firstIndex(where: { classify($0).discriminant == classification.discriminant }) {
       let existing = buffer[existingIndex]
-      buffer[existingIndex] = withMergedTimestamps(candidate, firstObservedAt: existing.firstObservedAt, occurrenceCount: existing.occurrenceCount + 1)
+      buffer[existingIndex] = withMergedTimestamps(
+        candidate, firstObservedAt: existing.firstObservedAt, occurrenceCount: existing.occurrenceCount + 1)
       await persistBuffer()
       return
     }
@@ -164,12 +166,16 @@ actor BufferedFactsStore {
     await persistBuffer()
   }
 
-  private func withMergedTimestamps(_ fact: BufferedFact, firstObservedAt: String, occurrenceCount: Int) -> BufferedFact {
+  private func withMergedTimestamps(
+    _ fact: BufferedFact, firstObservedAt: String, occurrenceCount: Int
+  ) -> BufferedFact {
     switch fact {
     case .adapterState(let state, _, let last, _):
-      return .adapterState(state: state, firstObservedAt: firstObservedAt, lastObservedAt: last, occurrenceCount: occurrenceCount)
+      return .adapterState(
+        state: state, firstObservedAt: firstObservedAt, lastObservedAt: last, occurrenceCount: occurrenceCount)
     case .updateError(let failure, _, let last, _):
-      return .updateError(failure: failure, firstObservedAt: firstObservedAt, lastObservedAt: last, occurrenceCount: occurrenceCount)
+      return .updateError(
+        failure: failure, firstObservedAt: firstObservedAt, lastObservedAt: last, occurrenceCount: occurrenceCount)
     }
   }
 
@@ -183,7 +189,8 @@ actor BufferedFactsStore {
       let fact = buffer[index]
       let factPriority = classify(fact).priority
       let worstPriority = classify(worst).priority
-      let isWorse = factPriority < worstPriority || (factPriority == worstPriority && fact.lastObservedAt < worst.lastObservedAt)
+      let isWorse =
+        factPriority < worstPriority || (factPriority == worstPriority && fact.lastObservedAt < worst.lastObservedAt)
       if isWorse { worstIndex = index }
     }
     return worstIndex

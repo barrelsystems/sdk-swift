@@ -10,7 +10,7 @@ private func pem(fromRawEd25519PublicKey raw: Data) -> String {
   return "-----BEGIN PUBLIC KEY-----\n\(der.base64EncodedString())\n-----END PUBLIC KEY-----\n"
 }
 
-@Suite struct PolicyVerificationTests {
+@Suite struct PolicyTests {
   @Test func parsesTheRealEmbeddedProductionKey() {
     #expect(ed25519PublicKey(fromPEM: publicEd25519KeyPEM) != nil)
   }
