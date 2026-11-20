@@ -5,7 +5,7 @@ import Sparkle
 /// headlessly, rather than being a passive `SPUUpdaterDelegate`-only
 /// observer -- the latter loses byte-level progress and checking signals.
 @MainActor
-public final class SparkleUpdaterAdapter: NSObject {
+final class SparkleUpdaterAdapter: NSObject {
   private var updater: SPUUpdater!
   private var feedURLOverride: String?
   private let bufferedFactsStore: BufferedFactsStore
@@ -28,9 +28,10 @@ public final class SparkleUpdaterAdapter: NSObject {
     super.init()
     updater = SPUUpdater(hostBundle: hostBundle, applicationBundle: hostBundle, userDriver: self, delegate: self)
     try? updater.start()
+    Task { await hydrateLastErrorFromBufferedFacts() }
   }
 
-  public func setFeedURL(_ url: String) {
+  func setFeedURL(_ url: String) {
     feedURLOverride = url
   }
 
@@ -40,13 +41,14 @@ public final class SparkleUpdaterAdapter: NSObject {
     for listener in onStateChangeListeners { listener(newState) }
   }
 
-  // MARK: Updater adapter public surface
-
-  public func checkForUpdates() {
+  func checkForUpdates() {
     updater.checkForUpdates()
   }
 
-  public func downloadUpdate() {
+  /// Records an internal defect and no-ops if nothing is `available` yet
+  /// -- the host is expected to gate this itself, so reaching here means
+  /// the host's own pre-action check was bypassed.
+  func downloadUpdate() {
     guard let reply = pendingUpdateReply else {
       InternalDefects.record("adapter:download-before-available")
       return
@@ -55,7 +57,10 @@ public final class SparkleUpdaterAdapter: NSObject {
     pendingUpdateReply = nil
   }
 
-  public func quitAndInstall() {
+  /// Records an internal defect and no-ops if nothing has `downloaded`
+  /// yet -- the host is expected to gate this itself, so reaching here
+  /// means the host's own pre-action check was bypassed.
+  func quitAndInstall() {
     guard let reply = pendingInstallReply else {
       InternalDefects.record("adapter:install-before-downloaded")
       return
@@ -64,24 +69,42 @@ public final class SparkleUpdaterAdapter: NSObject {
     pendingInstallReply = nil
   }
 
-  public func getAdapterState() -> AdapterState { state }
-  public func getLastUpdateError() -> UpdateFailure? { lastError }
+  func getAdapterState() -> AdapterState { state }
+  func getLastUpdateError() -> UpdateFailure? { lastError }
 
   /// Host-control registers its own listener here; `BarrelKit.onStateChange`
   /// registers the host app's, so this must support more than one.
-  public func onStateChange(_ listener: @escaping (AdapterState) -> Void) {
+  func onStateChange(_ listener: @escaping (AdapterState) -> Void) {
     onStateChangeListeners.append(listener)
+  }
+
+  /// Fills `lastError` from the most recent buffered `updateError` fact on a
+  /// fresh process start, before a check-in has run -- otherwise a crash
+  /// right after a failure would make `getLastUpdateError()` look clean.
+  private func hydrateLastErrorFromBufferedFacts() async {
+    guard lastError == nil else { return }
+    let mostRecent = await bufferedFactsStore.snapshot().compactMap { fact -> (UpdateFailure, String)? in
+      guard case .updateError(let failure, _, let lastObservedAt, _) = fact else { return nil }
+      return (failure, lastObservedAt)
+    }.max { $0.1 < $1.1 }?.0
+    guard let mostRecent else { return }
+    // Recompute `title`, same as `buildFailureState` does, rather than
+    // trusting whatever the buffered fact happened to carry.
+    lastError = UpdateFailure(
+      phase: mostRecent.phase, failureMode: mostRecent.failureMode,
+      title: resolveFailureTitle(mostRecent.failureMode), platform: mostRecent.platform,
+      platformCode: mostRecent.platformCode)
   }
 }
 
 extension SparkleUpdaterAdapter: SPUUpdaterDelegate {
-  public func feedURLString(for updater: SPUUpdater) -> String? {
+  func feedURLString(for updater: SPUUpdater) -> String? {
     feedURLOverride
   }
 }
 
 extension SparkleUpdaterAdapter: SPUUserDriver {
-  public func show(
+  func show(
     _ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void
   ) {
     // Full-wrap: this SDK's own cadence drives every check explicitly --
@@ -89,11 +112,11 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
     reply(SUUpdatePermissionResponse(automaticUpdateChecks: false, sendSystemProfile: false))
   }
 
-  public func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+  func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
     setState(.checking)
   }
 
-  public func showUpdateFound(
+  func showUpdateFound(
     with appcastItem: SUAppcastItem, state updateState: SPUUserUpdateState,
     reply: @escaping (SPUUserUpdateChoice) -> Void
   ) {
@@ -101,56 +124,59 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
     setState(.available(releaseNotes: appcastItem.itemDescription))
   }
 
-  public func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+  func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
 
-  public func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
+  func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {
+    recordFailure(error)
+  }
 
-  public func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+  func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
     setState(.idle)
     acknowledgement()
   }
 
-  public func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+  func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
     recordFailure(error)
     acknowledgement()
   }
 
-  public func showDownloadInitiated(cancellation: @escaping () -> Void) {
+  func showDownloadInitiated(cancellation: @escaping () -> Void) {
     setState(.downloading(progress: nil))
   }
 
-  public func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+  func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
     // Stored fields can't live in this extension, so this and the next
     // method route through the class's own stateful helpers below.
     setExpectedContentLength(expectedContentLength)
   }
 
-  public func showDownloadDidReceiveData(ofLength length: UInt64) {
+  func showDownloadDidReceiveData(ofLength length: UInt64) {
     accumulateReceivedContentLength(length)
   }
 
-  public func showDownloadDidStartExtractingUpdate() {}
+  func showDownloadDidStartExtractingUpdate() {}
 
-  public func showExtractionReceivedProgress(_ progress: Double) {
-    setState(.downloading(progress: Int((progress * 100).rounded())))
-  }
+  /// Extraction has no separate `AdapterState` bucket -- state stays
+  /// `.downloading` with whatever progress download already left in
+  /// place; this callback's own `progress` argument is never used.
+  func showExtractionReceivedProgress(_ progress: Double) {}
 
-  public func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+  func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
     pendingInstallReply = reply
     setState(.downloaded)
   }
 
-  public func showInstallingUpdate(
+  func showInstallingUpdate(
     withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void
   ) {}
 
-  public func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+  func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
     acknowledgement()
   }
 
-  public func showUpdateInFocus() {}
+  func showUpdateInFocus() {}
 
-  public func dismissUpdateInstallation() {
+  func dismissUpdateInstallation() {
     pendingUpdateReply = nil
     pendingInstallReply = nil
   }
@@ -193,44 +219,4 @@ extension SparkleUpdaterAdapter {
     Task { await bufferedFactsStore.recordUpdateError(failure) }
     setState(failedState)
   }
-}
-
-/// `SUError` exposes no string-name API -- this maps the stable, finite
-/// enum back to its real case names, for a `platformCode` independent of
-/// Swift's own runtime description format.
-private func sparkleErrorCaseName(_ code: OSStatus) -> String {
-  let names: [OSStatus: String] = [
-    SUError.noPublicDSAFoundError.rawValue: "SUNoPublicDSAFoundError",
-    SUError.insufficientSigningError.rawValue: "SUInsufficientSigningError",
-    SUError.insecureFeedURLError.rawValue: "SUInsecureFeedURLError",
-    SUError.invalidFeedURLError.rawValue: "SUInvalidFeedURLError",
-    SUError.invalidUpdaterError.rawValue: "SUInvalidUpdaterError",
-    SUError.invalidHostBundleIdentifierError.rawValue: "SUInvalidHostBundleIdentifierError",
-    SUError.invalidHostVersionError.rawValue: "SUInvalidHostVersionError",
-    SUError.appcastParseError.rawValue: "SUAppcastParseError",
-    SUError.appcastError.rawValue: "SUAppcastError",
-    SUError.runningFromDiskImageError.rawValue: "SURunningFromDiskImageError",
-    SUError.resumeAppcastError.rawValue: "SUResumeAppcastError",
-    SUError.runningTranslocated.rawValue: "SURunningTranslocated",
-    SUError.webKitTerminationError.rawValue: "SUWebKitTerminationError",
-    SUError.releaseNotesError.rawValue: "SUReleaseNotesError",
-    SUError.temporaryDirectoryError.rawValue: "SUTemporaryDirectoryError",
-    SUError.downloadError.rawValue: "SUDownloadError",
-    SUError.unarchivingError.rawValue: "SUUnarchivingError",
-    SUError.signatureError.rawValue: "SUSignatureError",
-    SUError.validationError.rawValue: "SUValidationError",
-    SUError.fileCopyFailure.rawValue: "SUFileCopyFailure",
-    SUError.authenticationFailure.rawValue: "SUAuthenticationFailure",
-    SUError.missingUpdateError.rawValue: "SUMissingUpdateError",
-    SUError.missingInstallerToolError.rawValue: "SUMissingInstallerToolError",
-    SUError.relaunchError.rawValue: "SURelaunchError",
-    SUError.installationError.rawValue: "SUInstallationError",
-    SUError.downgradeError.rawValue: "SUDowngradeError",
-    SUError.installationAuthorizeLaterError.rawValue: "SUInstallationAuthorizeLaterError",
-    SUError.notValidUpdateError.rawValue: "SUNotValidUpdateError",
-    SUError.agentInvalidationError.rawValue: "SUAgentInvalidationError",
-    SUError.installationWriteNoPermissionError.rawValue: "SUInstallationWriteNoPermissionError",
-    SUError.incorrectAPIUsageError.rawValue: "SUIncorrectAPIUsageError",
-  ]
-  return names[code] ?? "SUUnknownError(\(code))"
 }

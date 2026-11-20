@@ -24,5 +24,12 @@ let package = Package(
         .product(name: "Sparkle", package: "Sparkle"),
       ]
     ),
+    .executableTarget(
+      name: "TestService",
+      dependencies: [
+        "BarrelKit",
+        .product(name: "Sparkle", package: "Sparkle"),
+      ]
+    ),
   ]
 )

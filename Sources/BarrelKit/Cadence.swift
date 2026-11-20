@@ -95,6 +95,7 @@ private actor CadenceTicker {
     if !policyHoldsTheVendorCheck(policy, holdCacheMaxAge: params.holdCacheMaxAge) {
       await MainActor.run { params.checkForUpdates() }
     }
+
     // Snapshotting before the request goes out, and clearing exactly this
     // snapshot on ACK, is what keeps a fact recorded mid-flight from being
     // wiped alongside facts that were actually sent.
@@ -105,6 +106,7 @@ private actor CadenceTicker {
         sdkVersion: params.sdkVersion, attributes: params.attributes,
         adapterState: await MainActor.run { params.getAdapterState() },
         bufferedFacts: bufferedFacts, log: params.log))
+
     if response != nil { await params.clearBufferedFacts(bufferedFacts) }
     await params.onPolicyResponse(response)
   }

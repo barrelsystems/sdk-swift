@@ -3,7 +3,7 @@ import Testing
 
 @testable import BarrelKit
 
-@Suite struct SparkleErrorMappingTests {
+@Suite struct SparkleErrorMapTests {
   @Test func mapsSignatureMissingErrorsToVerify() {
     for code in [SUError.noPublicDSAFoundError, .insufficientSigningError] {
       let (phase, mode) = mapSparkleError(code.rawValue)

@@ -3,7 +3,11 @@
 State a rule here only if it's short and always relevant. Push anything longer
 or conditional to a pointed-to doc. This repo is published publicly — never
 add a reference here (or anywhere else in this repo) to internal tooling,
-ticket IDs, team names, or sibling repo names/paths.
+ticket IDs, team names, or a non-public sibling repo's name/path
+(`infrastructure`, the Home Repo). The other public repos in this SDK family
+(sdk-electron/sdk-tauri/sdk-swift/sdk-conformance-harness) may be referenced
+where structurally necessary — a dependency, a CI job driving the
+conformance harness.
 
 ## Size and dependency budget
 
@@ -25,10 +29,9 @@ unwrap (`!`) or force-try (`try!`) outside the declared-but-deferred-init
 pattern `SparkleUpdaterAdapter.updater` already uses; prefer `guard let`/`if
 let` elsewhere.
 
-## Tooling
+## Testing framework
 
-Swift Package Manager (`swift build`/`swift test`), Swift Testing (`@Suite`/
-`@Test`, not XCTest).
+Swift Testing (`@Suite`/`@Test`), not XCTest.
 
 ## Commit policy
 

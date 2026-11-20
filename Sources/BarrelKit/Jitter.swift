@@ -1,4 +1,4 @@
-private let fnvOffsetBasis: UInt32 = 0x811c9dc5
+private let fnvOffsetBasis: UInt32 = 0x811c_9dc5
 private let fnvPrime: UInt32 = 0x0100_0193
 
 private func fnv1a(_ input: String) -> UInt32 {
@@ -16,6 +16,6 @@ private func fnv1a(_ input: String) -> UInt32 {
 func computeJitterFraction(installationId: String) -> Double {
   let hash = fnv1a(installationId)
   let sign: Double = (hash & 1) == 0 ? 1 : -1
-  let magnitude = 0.1 + Double((hash >> 1) % 1000) / 1000 / 20
+  let magnitude = 0.1 + Double((hash >> 1) % 1000) / 1000 / 20  // 0.10..0.15
   return sign * magnitude
 }
