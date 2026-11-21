@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import BarrelKit
@@ -46,6 +47,36 @@ import Testing
     let snapshot = await store.snapshot()
     #expect(snapshot.count == 32)
     #expect(!snapshot.contains { if case .adapterState(.checking, _, _, _) = $0 { return true }; return false })
+  }
+
+  @Test func neverPersistsTitleAndRederivesItOnReloadFromDisk() async {
+    let path = NSTemporaryDirectory() + "barrel-test-\(UUID().uuidString)/facts.json"
+    defer { try? FileManager.default.removeItem(atPath: path) }
+
+    let failure = UpdateFailure(
+      phase: .download, failureMode: .downloadTransportFailed,
+      title: "The update download failed at the network layer.",
+      platform: "sparkle", platformCode: "test-code")
+
+    let store = BufferedFactsStore()
+    await store.configure(filePath: path)
+    await store.recordUpdateError(failure)
+
+    let onDisk = try? Data(contentsOf: URL(fileURLWithPath: path))
+    let onDiskString = onDisk.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    #expect(!onDiskString.contains("title"))
+    #expect(!onDiskString.contains("network layer"))
+
+    // A fresh instance reloading from disk must still see a real title --
+    // re-derived from `failureMode`, not read back from the file.
+    let reloaded = BufferedFactsStore()
+    await reloaded.configure(filePath: path)
+    let snapshot = await reloaded.snapshot()
+    guard case .updateError(let reloadedFailure, _, _, _) = snapshot.first else {
+      Issue.record("expected a reloaded updateError fact")
+      return
+    }
+    #expect(reloadedFailure.title == resolveFailureTitle(.downloadTransportFailed))
   }
 
   @Test func anIntermediateFactIsEvictedToMakeRoomForAnotherIntermediateFact() async {

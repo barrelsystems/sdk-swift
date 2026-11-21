@@ -13,6 +13,13 @@ extension BufferedFact: Codable {
     case kind, state, failure, firstObservedAt, lastObservedAt, occurrenceCount
   }
 
+  // `UpdateFailure.title` is a display string resolved from a static
+  // lookup table -- it must never reach disk. These keys exclude it, so
+  // encoding `.updateError` can't accidentally persist it.
+  private enum FailureCodingKeys: String, CodingKey {
+    case phase, failureMode, platform, platformCode
+  }
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let kind = try container.decode(String.self, forKey: .kind)
@@ -25,8 +32,16 @@ extension BufferedFact: Codable {
         state: try container.decode(AdapterState.self, forKey: .state),
         firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt, occurrenceCount: occurrenceCount)
     case "updateError":
+      let failureContainer = try container.nestedContainer(keyedBy: FailureCodingKeys.self, forKey: .failure)
+      let failureMode = try failureContainer.decode(UpdateFailureMode.self, forKey: .failureMode)
+      let failure = UpdateFailure(
+        phase: try failureContainer.decode(Phase.self, forKey: .phase),
+        failureMode: failureMode,
+        title: resolveFailureTitle(failureMode),  // re-derived, never read back from disk
+        platform: try failureContainer.decode(String.self, forKey: .platform),
+        platformCode: try failureContainer.decode(String.self, forKey: .platformCode))
       self = .updateError(
-        failure: try container.decode(UpdateFailure.self, forKey: .failure),
+        failure: failure,
         firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt, occurrenceCount: occurrenceCount)
     default:
       throw DecodingError.dataCorruptedError(
@@ -45,7 +60,11 @@ extension BufferedFact: Codable {
       try container.encode(count, forKey: .occurrenceCount)
     case .updateError(let failure, let first, let last, let count):
       try container.encode("updateError", forKey: .kind)
-      try container.encode(failure, forKey: .failure)
+      var failureContainer = container.nestedContainer(keyedBy: FailureCodingKeys.self, forKey: .failure)
+      try failureContainer.encode(failure.phase, forKey: .phase)
+      try failureContainer.encode(failure.failureMode, forKey: .failureMode)
+      try failureContainer.encode(failure.platform, forKey: .platform)
+      try failureContainer.encode(failure.platformCode, forKey: .platformCode)
       try container.encode(first, forKey: .firstObservedAt)
       try container.encode(last, forKey: .lastObservedAt)
       try container.encode(count, forKey: .occurrenceCount)

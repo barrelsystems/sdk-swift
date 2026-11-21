@@ -8,9 +8,7 @@ let maxHoldCacheMaxAge: TimeInterval = 7 * 24 * 60 * 60
 let sdkVersion = "0.1.0"
 
 struct CadenceParams: Sendable {
-  var baseURL: String
-  var credential: String
-  var installationId: String
+  var connection: BackendConnection
   var checkInInterval: TimeInterval
   var sdkVersion: String
   var attributes: [String: String]
@@ -51,7 +49,7 @@ func startCadence(_ params: CadenceParams) {
       "cadence: requested interval \(params.checkInInterval)s is below the \(minIntervalSeconds)s floor, clamped")
   }
   let interval = max(params.checkInInterval, minIntervalSeconds)
-  let jitterFraction = computeJitterFraction(installationId: params.installationId)
+  let jitterFraction = computeJitterFraction(installationId: params.connection.installationId)
   let jitteredInterval = interval * (1 + jitterFraction)
 
   let ticker = CadenceTicker(params: params)
@@ -102,7 +100,7 @@ private actor CadenceTicker {
     let bufferedFacts = await params.getBufferedFacts()
     let response = await sendCheckIn(
       CheckInParams(
-        baseURL: params.baseURL, credential: params.credential, installationId: params.installationId,
+        connection: params.connection,
         sdkVersion: params.sdkVersion, attributes: params.attributes,
         adapterState: await MainActor.run { params.getAdapterState() },
         bufferedFacts: bufferedFacts, log: params.log))

@@ -41,7 +41,8 @@ private func mockSession() -> URLSession {
     let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
     let control = HostControl(
       params: HostControlParams(
-        baseURL: "https://example.com", credential: "cred", installationId: "install-1", autoDownload: false,
+        connection: BackendConnection(baseURL: "https://example.com", credential: "cred", installationId: "install-1"),
+        autoDownload: false,
         getTrustedKeyPEM: { "key" }, adapter: adapter, session: mockSession()))
 
     await control.downloadUpdate()
@@ -53,7 +54,8 @@ private func mockSession() -> URLSession {
     let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
     let control = HostControl(
       params: HostControlParams(
-        baseURL: "https://example.com", credential: "cred", installationId: "install-1", autoDownload: false,
+        connection: BackendConnection(baseURL: "https://example.com", credential: "cred", installationId: "install-1"),
+        autoDownload: false,
         getTrustedKeyPEM: { "key" }, adapter: adapter, session: mockSession()))
 
     await control.applyUpdate()
