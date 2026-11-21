@@ -12,6 +12,11 @@ struct HttpRequest {
   let body: Data
 }
 
+/// Generous headroom over any real body this service's routes expect
+/// (base64 keys, check-in/policy JSON, event payloads -- all well under a
+/// few KB), while still bounding a harness-controlled `Content-Length`.
+private let maxRequestBodyBytes = 1 << 20  // 1 MiB
+
 struct HttpResponse {
   let status: Int
   let body: Data
@@ -117,6 +122,11 @@ final class MinimalHttpServer: @unchecked Sendable {
       .first { $0.lowercased().hasPrefix("content-length:") }
       .flatMap { $0.split(separator: ":").last }
       .flatMap { Int($0.trimmingCharacters(in: .whitespaces)) } ?? 0
+
+    // The harness controls this header -- bound it well before the body
+    // reaches any `JSONDecoder`/`JSONSerialization` call downstream, so a
+    // bogus huge value can't drive unbounded memory growth here.
+    guard contentLength <= maxRequestBodyBytes else { return nil }
 
     var body = Data(buffer[headerEnd.upperBound...])
     while body.count < contentLength {

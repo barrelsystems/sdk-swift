@@ -17,9 +17,7 @@ func toWireBufferedFact(_ fact: BufferedFact) -> WireBufferedFact {
 }
 
 struct CheckInParams: Sendable {
-  var baseURL: String
-  var credential: String
-  var installationId: String
+  var connection: BackendConnection
   var sdkVersion: String
   var attributes: [String: String]
   var adapterState: AdapterState
@@ -34,7 +32,7 @@ func sendCheckIn(_ params: CheckInParams) async -> CheckInResponse? {
   let env = collectEnvironment()
   let body = CheckInRequest(
     protocolVersion: protocolVersion,
-    installationId: params.installationId,
+    installationId: params.connection.installationId,
     eventId: UUID().uuidString.lowercased(),
     checkedInAt: ISO8601DateFormatter().string(from: Date()),
     sdkVersion: params.sdkVersion,
@@ -49,6 +47,6 @@ func sendCheckIn(_ params: CheckInParams) async -> CheckInResponse? {
 
   return await postProtocolRequest(
     PostProtocolRequestParams(
-      baseURL: params.baseURL, path: "check-in", credential: params.credential, body: body,
+      baseURL: params.connection.baseURL, path: "check-in", credential: params.connection.credential, body: body,
       label: "check-in", log: params.log))
 }

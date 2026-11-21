@@ -4,6 +4,15 @@ import Foundation
 /// bumped only on a breaking change to its shape.
 public let protocolVersion = 1
 
+/// Where and who: every protocol-level request (check-in, pre-action-check,
+/// and the cadence/host-control layers that trigger them) needs all three
+/// of these together, never a subset.
+struct BackendConnection: Sendable {
+  var baseURL: String
+  var credential: String
+  var installationId: String
+}
+
 /// Config passed to `initialize()`. `credential` is the only required field.
 public struct InitConfig: Sendable {
   /// The SDK credential issued by Barrel for this app.

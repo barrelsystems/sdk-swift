@@ -6,9 +6,7 @@ enum PreActionStage: String, Sendable {
 }
 
 struct PreActionCheckParams: Sendable {
-  var baseURL: String
-  var credential: String
-  var installationId: String
+  var connection: BackendConnection
   var stage: PreActionStage
   var trustedKeyPEM: String
   var log: (@Sendable (String) -> Void)?
@@ -25,13 +23,13 @@ func checkPreAction(_ params: PreActionCheckParams) async -> Policy? {
     var stage: String
   }
   let body = Body(
-    protocolVersion: protocolVersion, installationId: params.installationId, stage: params.stage.rawValue)
+    protocolVersion: protocolVersion, installationId: params.connection.installationId, stage: params.stage.rawValue)
 
   guard
     let parsed = await postProtocolRequest(
       PostProtocolRequestParams(
-        baseURL: params.baseURL, path: "pre-action-check", credential: params.credential, body: body,
-        label: "pre-action-check", log: params.log, session: params.session))
+        baseURL: params.connection.baseURL, path: "pre-action-check", credential: params.connection.credential,
+        body: body, label: "pre-action-check", log: params.log, session: params.session))
   else { return nil }
 
   return verifyAndParsePolicy(parsed, publicKeyPEM: params.trustedKeyPEM)

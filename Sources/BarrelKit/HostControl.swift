@@ -1,9 +1,7 @@
 import Foundation
 
 struct HostControlParams: Sendable {
-  var baseURL: String
-  var credential: String
-  var installationId: String
+  var connection: BackendConnection
   var autoDownload: Bool
   var getTrustedKeyPEM: @Sendable () async -> String
   var adapter: SparkleUpdaterAdapter
@@ -28,7 +26,7 @@ final class HostControl {
   private func canProceed(stage: PreActionStage) async -> Bool {
     let policy = await checkPreAction(
       PreActionCheckParams(
-        baseURL: params.baseURL, credential: params.credential, installationId: params.installationId,
+        connection: params.connection,
         stage: stage, trustedKeyPEM: await params.getTrustedKeyPEM(), log: params.log, session: params.session))
     if case .held = policy { return false }
     return true

@@ -60,19 +60,21 @@ public final class BarrelKit {
         newAdapter.setFeedURL(updateFeedURL)
       }
 
+      let connection = BackendConnection(baseURL: baseURL, credential: config.credential, installationId: installationId)
+
       adapter = newAdapter
       for listener in pendingStateChangeListeners { newAdapter.onStateChange(listener) }
       pendingStateChangeListeners = []
       hostControl = HostControl(
         params: HostControlParams(
-          baseURL: baseURL, credential: config.credential, installationId: installationId,
+          connection: connection,
           autoDownload: autoDownload,
           getTrustedKeyPEM: { [self] in await self.trustedKeyStore.current() ?? publicEd25519KeyPEM },
           adapter: newAdapter, log: debugLog))
 
       startCadence(
         CadenceParams(
-          baseURL: baseURL, credential: config.credential, installationId: installationId,
+          connection: connection,
           checkInInterval: checkInInterval, sdkVersion: sdkVersion, attributes: config.attributes,
           log: debugLog,
           getAdapterState: { newAdapter.getAdapterState() },

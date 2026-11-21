@@ -24,6 +24,10 @@ final class AdapterInstance {
   // a second attempt while one is already in flight is skipped, not queued.
   let checkInLock = Locked<Bool>(false)
 
+  var connection: BackendConnection {
+    BackendConnection(baseURL: checkInBaseURL, credential: "test-service", installationId: installationId)
+  }
+
   init(checkInBaseURL: String, publicKeyPEM: String) {
     adapter = SparkleUpdaterAdapter(
       hostBundle: makeTestHostBundle(), bufferedFactsStore: BufferedFactsStore())
@@ -105,8 +109,8 @@ func route(_ request: HttpRequest) -> HttpResponse {
 
       let adapterState = runOnMain { instance.adapter.getAdapterState() }
       let checkInParams = CheckInParams(
-        baseURL: instance.checkInBaseURL, credential: "test-service",
-        installationId: instance.installationId, sdkVersion: "0.0.1", attributes: [:],
+        connection: runOnMain { instance.connection },
+        sdkVersion: "0.0.1", attributes: [:],
         adapterState: adapterState, bufferedFacts: [])
       let response = runBlocking(fallback: nil) { await sendCheckIn(checkInParams) }
       if let response {
@@ -118,8 +122,8 @@ func route(_ request: HttpRequest) -> HttpResponse {
         return .empty(404)
       }
       let preActionParams = PreActionCheckParams(
-        baseURL: instance.checkInBaseURL, credential: "test-service",
-        installationId: instance.installationId, stage: stage, trustedKeyPEM: instance.publicKeyPEM)
+        connection: runOnMain { instance.connection },
+        stage: stage, trustedKeyPEM: instance.publicKeyPEM)
       // Fails open to "current" -- `checkPreAction` resolves `nil` on any
       // network/signature failure, and a fail-open caller proceeds exactly
       // as it would under a `current` Policy.

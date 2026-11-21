@@ -1,5 +1,6 @@
 .DS_Store
 .vscode
+.sourcekit-lsp
 /.build
 /Examples/*/.build
 /Examples/*/Package.resolved

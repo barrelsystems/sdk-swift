@@ -5,6 +5,11 @@ import Foundation
 actor TrustedKeyStore {
   private var cachedKeyPEM: String?
   private var filePath: String?
+  // Actors are reentrant across an `await` -- without this, a second
+  // `applyRotationIfPresent` could run its own guard checks and disk
+  // write interleaved with this one's, leaving disk out of sync with
+  // whichever call's in-memory update happened to land last.
+  private var rotationInFlight: Task<Void, Never>?
 
   /// Resolves the key in effect at startup: a previously-adopted rotation
   /// cached on disk, or the build-time default otherwise. Call once, before
@@ -30,6 +35,12 @@ actor TrustedKeyStore {
   /// Verifies a rotation announcement against the key this SDK ALREADY
   /// trusts, never the new key -- a key can only vouch for its own successor.
   func applyRotationIfPresent(_ response: CheckInResponse) async {
+    // Wait for any rotation already in flight to fully finish (memory AND
+    // disk) before this call reads `cachedKeyPEM` or writes its own --
+    // otherwise two overlapping calls could get their disk writes done
+    // out of order relative to the in-memory key they end up agreeing on.
+    await rotationInFlight?.value
+
     guard
       let nextPublicKeyPEM = response.nextPublicKeyPem,
       let nextPublicKeySignature = response.nextPublicKeySignature,
@@ -42,6 +53,9 @@ actor TrustedKeyStore {
 
     cachedKeyPEM = nextPublicKeyPEM
     guard let filePath, let data = try? JSONEncoder().encode(["publicKeyPEM": nextPublicKeyPEM]) else { return }
-    await DiskStore.persist(path: filePath, data: data)
+
+    let persistTask = Task { await DiskStore.persist(path: filePath, data: data) }
+    rotationInFlight = persistTask
+    await persistTask.value
   }
 }
