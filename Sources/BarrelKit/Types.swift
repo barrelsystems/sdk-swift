@@ -74,22 +74,10 @@ public enum UpdateFailureMode: String, Sendable, Codable {
   case signatureInvalid = "signature-invalid"
   /// The update's signed version doesn't match the manifest.
   case signatureVersionMismatch = "signature-version-mismatch"
-  /// The downloaded update failed its checksum check.
-  case checksumMismatch = "checksum-mismatch"
   /// The update download failed at the network layer.
   case downloadTransportFailed = "download-transport-failed"
-  /// The downloaded update file is invalid.
-  case downloadFileInvalid = "download-file-invalid"
-  /// The update download exceeded its expected size.
-  case downloadSizeExceeded = "download-size-exceeded"
-  /// The update download stream ended early.
-  case downloadStreamIncomplete = "download-stream-incomplete"
-  /// The differential update patch is incompatible.
-  case diffPatchIncompatible = "diff-patch-incompatible"
   /// The downloaded update could not be extracted.
   case extractionFailed = "extraction-failed"
-  /// The expected update target is missing from the manifest.
-  case targetNotFoundInManifest = "target-not-found-in-manifest"
   /// A temporary-storage constraint blocked the update.
   case tempStorageConstraint = "temp-storage-constraint"
   /// The update could not be written to disk.
@@ -104,8 +92,6 @@ public enum UpdateFailureMode: String, Sendable, Codable {
   case installMissingUpdate = "install-missing-update"
   /// The updater's configuration is invalid.
   case configInvalid = "config-invalid"
-  /// The update server's CORS headers are misconfigured.
-  case corsMisconfigured = "cors-misconfigured"
   /// This update isn't supported on the current platform.
   case platformUnsupported = "platform-unsupported"
   /// macOS App Translocation blocked the update.

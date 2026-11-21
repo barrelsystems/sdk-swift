@@ -5,11 +5,10 @@ import Testing
 @Suite struct ErrorTaxonomyTests {
   @Test(arguments: [
     UpdateFailureMode.manifestUnreachable, .manifestParseFailed, .versionInvalid, .signatureMissing,
-    .signatureInvalid, .signatureVersionMismatch, .checksumMismatch, .downloadTransportFailed,
-    .downloadFileInvalid, .downloadSizeExceeded, .downloadStreamIncomplete, .diffPatchIncompatible,
-    .extractionFailed, .targetNotFoundInManifest, .tempStorageConstraint, .installWriteFailed,
+    .signatureInvalid, .signatureVersionMismatch, .downloadTransportFailed,
+    .extractionFailed, .tempStorageConstraint, .installWriteFailed,
     .installAuthRequiredOrFailed, .installDowngradeBlocked, .installRelaunchFailed, .installMissingUpdate,
-    .configInvalid, .corsMisconfigured, .platformUnsupported, .translocationBlocked,
+    .configInvalid, .platformUnsupported, .translocationBlocked,
     .webkitTerminated, .releaseNotesFailed, .resumeAppcastFailed, .unknown,
   ])
   func resolvesANonEmptyTitleForEveryMode(_ mode: UpdateFailureMode) {

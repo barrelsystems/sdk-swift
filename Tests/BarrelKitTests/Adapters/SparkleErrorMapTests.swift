@@ -78,11 +78,52 @@ import Testing
   }
 
   @Test func neverMapsTheTwoNonFailureCodes() {
-    // SUNoUpdateError and SUInstallationCanceledError must be special-cased by
-    // the caller before reaching this function -- this only guards that if
-    // one slips through, it doesn't silently resolve to a plausible-looking
-    // failure, masking the missing special case.
+    // SUNoUpdateError/SUInstallationCanceledError must be special-cased by
+    // the caller before reaching this function -- this only guards that a
+    // slipped-through code doesn't silently resolve to a plausible failure.
     #expect(mapSparkleError(SUError.noUpdateError.rawValue).failureMode == .unknown)
     #expect(mapSparkleError(SUError.installationCanceledError.rawValue).failureMode == .unknown)
+  }
+
+  @Test func mapsUnreachableNoUpdateFoundReasonsToPlatformUnsupported() {
+    for reason: SPUNoUpdateFoundReason in [.systemIsTooOld, .systemIsTooNew, .hardwareDoesNotSupportARM64] {
+      let mapped = mapSparkleNoUpdateFoundReason(reason)
+      #expect(mapped?.phase == .config)
+      #expect(mapped?.failureMode == .platformUnsupported)
+    }
+  }
+
+  @Test func mapsGenuinelyCurrentNoUpdateFoundReasonsToNil() {
+    // These mean "you're already current", not a failure -- the caller
+    // must keep treating them as a no-op idle transition.
+    for reason: SPUNoUpdateFoundReason in [.onLatestVersion, .onNewerThanLatestVersion] {
+      #expect(mapSparkleNoUpdateFoundReason(reason) == nil)
+    }
+  }
+
+  @Test func mapsUnknownNoUpdateFoundReasonToNilWithoutClaimingCurrency() {
+    // Sparkle attached no reason -- this falls back to idle like the
+    // genuinely-current cases above, but it is not itself evidence of currency.
+    #expect(mapSparkleNoUpdateFoundReason(.unknown) == nil)
+  }
+
+  @Test func knownSparkleErrorCaseCountMatchesSUErrorsH() {
+    // SUError is an NS_ENUM import, so the compiler enforces no
+    // switch-exhaustiveness over it -- a version bump adding a case
+    // compiles silently and needs this count to catch the drift.
+    let knownSUErrorCaseCount = 33
+    #expect(knownSparkleErrorCaseCount() == knownSUErrorCaseCount)
+  }
+
+  @Test func mapSparkleErrorHandlesEveryKnownCodeExplicitly() {
+    // `mapSparkleError`'s `default` arm is the only one returning phase
+    // `.unknown`; a code present in `sparkleErrorNamesByCode` but missing
+    // its own switch arm would silently fall through to it instead.
+    let specialCased: Set<OSStatus> = [
+      SUError.noUpdateError.rawValue, SUError.installationCanceledError.rawValue,
+    ]
+    for code in knownSparkleErrorCodes() where !specialCased.contains(code) {
+      #expect(mapSparkleError(code).phase != .unknown)
+    }
   }
 }
