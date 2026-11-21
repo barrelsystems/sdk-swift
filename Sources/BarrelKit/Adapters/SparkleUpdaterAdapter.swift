@@ -130,7 +130,17 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
     recordFailure(error)
   }
 
+  /// Sparkle delivers this with a generic `SUNoUpdateError`, but its
+  /// `userInfo` reason can mean the host can never take an update that
+  /// exists -- a genuine failure; every other reason stays idle.
   func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+    if let rawReason = (error as NSError).userInfo[SPUNoUpdateFoundReasonKey] as? Int,
+      let reason = SPUNoUpdateFoundReason(rawValue: OSStatus(rawReason)),
+      let (phase, failureMode) = mapSparkleNoUpdateFoundReason(reason) {
+      applyFailure(phase: phase, failureMode: failureMode, platformCode: noUpdateFoundReasonCaseName(reason))
+      acknowledgement()
+      return
+    }
     setState(.idle)
     acknowledgement()
   }
@@ -212,7 +222,13 @@ extension SparkleUpdaterAdapter {
     }
 
     let (phase, failureMode) = mapSparkleError(code)
-    let platformCode = sparkleErrorCaseName(code)
+    applyFailure(phase: phase, failureMode: failureMode, platformCode: sparkleErrorCaseName(code))
+  }
+
+  /// Shared tail end of classifying any Sparkle failure, regardless of
+  /// which callback surfaced it -- builds the failure, buffers it, and
+  /// transitions `state`.
+  fileprivate func applyFailure(phase: Phase, failureMode: UpdateFailureMode, platformCode: String) {
     let (failure, failedState) = buildFailureState(
       platform: "sparkle", failureMode: failureMode, phase: phase, platformCode: platformCode)
     lastError = failure

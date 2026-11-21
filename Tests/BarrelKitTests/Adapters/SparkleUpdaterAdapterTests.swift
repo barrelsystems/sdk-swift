@@ -111,4 +111,50 @@ import Testing
     #expect(failure?.failureMode == .releaseNotesFailed)
     #expect(failure?.platformCode == "SUReleaseNotesError")
   }
+
+  // Spec: Sparkle reports "no update found" with the generic SUNoUpdateError
+  // for every reason, but a host too old/new/unsupported for the found
+  // update is a real failure -- classified from SPUNoUpdateFoundReasonKey.
+  @Test @MainActor func showUpdateNotFoundWithErrorRecordsAFailureWhenTheHostCannotTakeTheFoundUpdate() {
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+    // Sparkle itself boxes the reason as `@(reason)` (an NSNumber) -- mirror
+    // that here rather than a bare Int32, which doesn't bridge the same way.
+    let error = NSError(
+      domain: "SUSparkleErrorDomain", code: Int(SUError.noUpdateError.rawValue),
+      userInfo: [SPUNoUpdateFoundReasonKey: NSNumber(value: SPUNoUpdateFoundReason.systemIsTooOld.rawValue)])
+
+    adapter.showUpdateNotFoundWithError(error, acknowledgement: {})
+
+    let failure = adapter.getLastUpdateError()
+    #expect(failure?.phase == .config)
+    #expect(failure?.failureMode == .platformUnsupported)
+    #expect(failure?.platformCode == "SPUNoUpdateFoundReasonSystemIsTooOld")
+    #expect(adapter.getAdapterState() == .failed(category: .updater, code: .platformUnsupported, platformCode: "SPUNoUpdateFoundReasonSystemIsTooOld"))
+  }
+
+  // Spec: the ordinary "you're already current" reasons stay a no-op --
+  // this must not regress into treating every no-update-found as a failure.
+  @Test @MainActor func showUpdateNotFoundWithErrorStaysIdleWhenGenuinelyCurrent() {
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+    let error = NSError(
+      domain: "SUSparkleErrorDomain", code: Int(SUError.noUpdateError.rawValue),
+      userInfo: [SPUNoUpdateFoundReasonKey: NSNumber(value: SPUNoUpdateFoundReason.onLatestVersion.rawValue)])
+
+    adapter.showUpdateNotFoundWithError(error, acknowledgement: {})
+
+    #expect(adapter.getAdapterState() == .idle)
+    #expect(adapter.getLastUpdateError() == nil)
+  }
+
+  // Spec: an error with no reason key at all (or an unrecognized one) must
+  // fall back to idle rather than crashing or misclassifying.
+  @Test @MainActor func showUpdateNotFoundWithErrorStaysIdleWhenNoReasonIsPresent() {
+    let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+    let error = NSError(domain: "SUSparkleErrorDomain", code: Int(SUError.noUpdateError.rawValue))
+
+    adapter.showUpdateNotFoundWithError(error, acknowledgement: {})
+
+    #expect(adapter.getAdapterState() == .idle)
+    #expect(adapter.getLastUpdateError() == nil)
+  }
 }

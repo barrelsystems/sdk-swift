@@ -60,8 +60,7 @@ func mapSparkleError(_ code: OSStatus) -> (phase: Phase, failureMode: UpdateFail
 }
 
 /// The single source of truth for `SUError`'s raw code <-> real case-name
-/// mapping, in both directions. `sparkleErrorCaseName` and
-/// `sparkleErrorCode(named:)` are its only readers.
+/// mapping, in both directions; only read by the accessors below.
 private let sparkleErrorNamesByCode: [OSStatus: String] = [
   SUError.noPublicDSAFoundError.rawValue: "SUNoPublicDSAFoundError",
   SUError.insufficientSigningError.rawValue: "SUInsufficientSigningError",
@@ -103,6 +102,49 @@ private let sparkleErrorNamesByCode: [OSStatus: String] = [
 /// Swift's own runtime description format.
 func sparkleErrorCaseName(_ code: OSStatus) -> String {
   sparkleErrorNamesByCode[code] ?? "SUUnknownError(\(code))"
+}
+
+/// Exposes `sparkleErrorNamesByCode`'s size and keys for the
+/// exhaustiveness-drift tests -- the dictionary itself stays `private` so it
+/// keeps exactly its two production readers above.
+func knownSparkleErrorCaseCount() -> Int {
+  sparkleErrorNamesByCode.count
+}
+
+/// See `knownSparkleErrorCaseCount()`.
+func knownSparkleErrorCodes() -> [OSStatus] {
+  Array(sparkleErrorNamesByCode.keys)
+}
+
+/// Sparkle reports "no update found" with a single generic `SUNoUpdateError`
+/// code, but attaches a real, distinct `SPUNoUpdateFoundReasonKey` in the
+/// error's `userInfo` (see `SUErrors.h`/`SPUBasicUpdateDriver.m`).
+
+/// `.onLatestVersion`/`.onNewerThanLatestVersion` mean genuinely current;
+/// `.unknown` only means no reason was attached, not that it is. The other
+/// three mean an update exists in the feed that this host can never take.
+func mapSparkleNoUpdateFoundReason(_ reason: SPUNoUpdateFoundReason) -> (phase: Phase, failureMode: UpdateFailureMode)? {
+  switch reason {
+  case .systemIsTooOld, .systemIsTooNew, .hardwareDoesNotSupportARM64:
+    return (.config, .platformUnsupported)
+  default:
+    return nil
+  }
+}
+
+/// Mirrors `sparkleErrorNamesByCode` for `SPUNoUpdateFoundReason`, whose
+/// cases also have no string-name API of their own.
+private let noUpdateFoundReasonNamesByCode: [OSStatus: String] = [
+  SPUNoUpdateFoundReason.unknown.rawValue: "SPUNoUpdateFoundReasonUnknown",
+  SPUNoUpdateFoundReason.onLatestVersion.rawValue: "SPUNoUpdateFoundReasonOnLatestVersion",
+  SPUNoUpdateFoundReason.onNewerThanLatestVersion.rawValue: "SPUNoUpdateFoundReasonOnNewerThanLatestVersion",
+  SPUNoUpdateFoundReason.systemIsTooOld.rawValue: "SPUNoUpdateFoundReasonSystemIsTooOld",
+  SPUNoUpdateFoundReason.systemIsTooNew.rawValue: "SPUNoUpdateFoundReasonSystemIsTooNew",
+  SPUNoUpdateFoundReason.hardwareDoesNotSupportARM64.rawValue: "SPUNoUpdateFoundReasonHardwareDoesNotSupportARM64",
+]
+
+func noUpdateFoundReasonCaseName(_ reason: SPUNoUpdateFoundReason) -> String {
+  noUpdateFoundReasonNamesByCode[reason.rawValue] ?? "SPUNoUpdateFoundReasonUnknown(\(reason.rawValue))"
 }
 
 /// Looks up a named `SUError` by its real case name, for scenarios that
