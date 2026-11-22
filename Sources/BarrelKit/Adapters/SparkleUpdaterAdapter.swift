@@ -13,6 +13,7 @@ final class SparkleUpdaterAdapter: NSObject {
 
   private var state: AdapterState = .idle
   private var lastError: UpdateFailure?
+  private var reportedDriverError: NSError?
   private var targetVersion: String?
   private var onStateChangeListeners: [(AdapterState) -> Void] = []
 
@@ -116,6 +117,20 @@ extension SparkleUpdaterAdapter: SPUUpdaterDelegate {
   func feedURLString(for updater: SPUUpdater) -> String? {
     feedURLOverride
   }
+
+  func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+    let nativeError = error as NSError
+
+    // Sparkle can report the same error to the user driver and delegate.
+    // Its completion callback must not count that one failure twice.
+    if reportedDriverError === nativeError {
+      reportedDriverError = nil
+      return
+    }
+
+    reportedDriverError = nil
+    recordFailure(error)
+  }
 }
 
 extension SparkleUpdaterAdapter: SPUUserDriver {
@@ -156,6 +171,7 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
   /// `userInfo` reason can mean the host can never take an update that
   /// exists -- a genuine failure; every other reason stays idle.
   func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+    reportedDriverError = error as NSError
     if let rawReason = (error as NSError).userInfo[SPUNoUpdateFoundReasonKey] as? Int,
       let reason = SPUNoUpdateFoundReason(rawValue: OSStatus(rawReason)),
       let (phase, failureMode) = mapSparkleNoUpdateFoundReason(reason) {
@@ -168,11 +184,14 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
   }
 
   func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+    reportedDriverError = error as NSError
     recordFailure(error)
     acknowledgement()
   }
 
   func showDownloadInitiated(cancellation: @escaping () -> Void) {
+    expectedContentLength = 0
+    receivedContentLength = 0
     setState(.downloading(progress: nil))
   }
 
