@@ -42,10 +42,10 @@ private struct AnyEncodable: Encodable {
 }
 
 /// A minimal HTTP/1.1 server over raw POSIX sockets for this service's
-/// own small, fixed request shapes. `run()` hands this fully off to one
-/// background thread after `start()`; nothing else touches its state.
+/// own small, fixed request shapes. Bind before `run()`; concurrent
+/// request handlers share only the immutable routing configuration.
 final class MinimalHttpServer: @unchecked Sendable {
-  typealias Handler = (HttpRequest) -> HttpResponse
+  typealias Handler = @Sendable (HttpRequest) -> HttpResponse
 
   private let handler: Handler
   private var listenSocket: Int32 = -1
@@ -82,16 +82,17 @@ final class MinimalHttpServer: @unchecked Sendable {
     return boundAddress.sin_port.byteSwapped
   }
 
-  /// Blocks forever, handling one connection at a time -- the harness
-  /// drives this service's own adapters sequentially, never concurrently.
+  /// Allows observations while an action is waiting on its backend response.
   func run() {
     while true {
       let client = accept(listenSocket, nil, nil)
       guard client >= 0 else { continue }
-      defer { close(client) }
-      guard let request = readRequest(from: client) else { continue }
-      let response = handler(request)
-      writeResponse(response, to: client)
+      DispatchQueue.global().async { [self] in
+        defer { close(client) }
+        guard let request = readRequest(from: client) else { return }
+        let response = handler(request)
+        writeResponse(response, to: client)
+      }
     }
   }
 

@@ -2,40 +2,37 @@ import Foundation
 
 @testable import BarrelKit
 
-// `main.swift`'s own top-level code gets special main-actor treatment that
-// an ordinary file's top-level code doesn't -- `AppcastServer`'s own state
-// is already protected by its internal `Locked`, so this is genuinely safe.
-nonisolated(unsafe) let appcastServer = AppcastServer()
-let appcastPort = appcastServer.start()
-
-/// `injectEvent`'s eventName names one of Sparkle's own `SPUUserDriver`
-/// callbacks for NSObject-constructable cases, or "updateFound"/
-/// "updateNotAvailable" for the ones that need a real `checkForUpdates()`.
 @MainActor
 final class AdapterInstance {
-  let adapter: SparkleUpdaterAdapter
-  // Mandatory on every `createAdapter` call; the Sparkle adapter above
-  // stays independent of them -- check-in scenarios never touch it, and
-  // adapter-event scenarios never touch check-in.
-  let checkInBaseURL: String
-  let publicKeyPEM: String
-  let channel: String
-  let installationId = UUID().uuidString.lowercased()
-  // Guards `checkNow` against a concurrent attempt on this same instance --
-  // a second attempt while one is already in flight is skipped, not queued.
-  let checkInLock = Locked<Bool>(false)
+  let runtime: BarrelKit
+  let probe: UpdaterProbe
+  let dataDirectory: URL
 
-  var connection: BackendConnection {
-    BackendConnection(baseURL: checkInBaseURL, credential: "test-service", installationId: installationId)
+  var adapter: SparkleUpdaterAdapter {
+    guard let adapter = runtime.adapter else { preconditionFailure("SDK has not initialized") }
+    return adapter
   }
 
   init(checkInBaseURL: String, publicKeyPEM: String, channel: String) {
-    adapter = SparkleUpdaterAdapter(
-      hostBundle: makeTestHostBundle(), bufferedFactsStore: BufferedFactsStore())
-    adapter.setFeedURL("http://127.0.0.1:\(appcastPort)/appcast.xml")
-    self.checkInBaseURL = checkInBaseURL
-    self.publicKeyPEM = publicKeyPEM
-    self.channel = channel
+    let probe = UpdaterProbe()
+    self.probe = probe
+    dataDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("barrel-runtime-\(UUID().uuidString)")
+    do {
+      try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+      let key = try JSONEncoder().encode(["publicKeyPEM": publicKeyPEM])
+      try key.write(to: dataDirectory.appendingPathComponent("barrel-trusted-key.json"))
+    } catch { preconditionFailure("Could not create isolated SDK storage: \(error)") }
+
+    runtime = BarrelKit(environment: RuntimeEnvironment(
+      hostBundle: makeTestHostBundle(), dataDirectory: dataDirectory,
+      makeAdapter: { bundle, facts in
+        let adapter = SparkleUpdaterAdapter(hostBundle: bundle, bufferedFactsStore: facts, checkForUpdates: { probe.checkForUpdates() })
+        probe.adapter = adapter
+        return adapter
+      },
+      scheduleCadence: { CadenceTicker(params: $0) }))
+    do { try runtime.initialize(InitConfig(credential: "test-service", baseURL: checkInBaseURL, channel: channel, autoDownload: false)) }
+    catch { preconditionFailure("Invalid test runtime config: \(error)") }
   }
 }
 
@@ -50,6 +47,7 @@ final class AdapterRegistry: @unchecked Sendable {
         channel: request.channel ?? "stable")
     }
 
+    runBlocking(fallback: ()) { await instance.runtime.ready() }
     adapters.write { $0[id] = instance }
     return id
   }
@@ -59,6 +57,10 @@ final class AdapterRegistry: @unchecked Sendable {
   }
 
   func destroy(_ id: String) {
+    if let instance = adapters.read({ $0[id] }) {
+      let directory = runOnMain { instance.dataDirectory }
+      try? FileManager.default.removeItem(at: directory)
+    }
     adapters.write { $0.removeValue(forKey: id) }
   }
 }
@@ -95,58 +97,36 @@ func route(_ request: HttpRequest) -> HttpResponse {
 
     switch command {
     case "getAdapterState":
-      return .json(200, ResultWrapper(result: runOnMain { instance.adapter.getAdapterState() }))
+      return .json(200, ResultWrapper(result: runOnMain { instance.runtime.getAdapterState() }))
+    case "getPolicy":
+      return .json(200, ResultWrapper(result: runOnMain { instance.runtime.getPolicy() }))
     case "getLastUpdateError":
-      return .json(200, ResultWrapper(result: runOnMain { instance.adapter.getLastUpdateError() }))
+      return .json(200, ResultWrapper(result: runOnMain { instance.runtime.getLastUpdateError() }))
+    case "getUpdaterActivity":
+      return .json(200, ResultWrapper(result: runOnMain { instance.probe.activity }))
     case "checkNow":
-      var acquiredLock = false
-      instance.checkInLock.write { inFlight in
-        if !inFlight {
-          inFlight = true
-          acquiredLock = true
-        }
-      }
-
-      guard acquiredLock else {
-        // Skips, not queues -- matches the other platforms' explicit locks.
-        return .json(200, ResultWrapper<String?>(result: nil))
-      }
-      defer { instance.checkInLock.write { $0 = false } }
-
-      let adapterState = runOnMain { instance.adapter.getAdapterState() }
-      let checkInParams = CheckInParams(
-        connection: runOnMain { instance.connection },
-        sdkVersion: "0.0.1", channel: runOnMain { instance.channel }, attributes: [:],
-        adapterState: adapterState, bufferedFacts: [])
-      let response = runBlocking(fallback: nil) { await sendCheckIn(checkInParams) }
-      if let response {
-        _ = verifyAndParsePolicy(response, publicKeyPEM: instance.publicKeyPEM)
-      }
+      runBlocking(fallback: ()) { await instance.runtime.checkNow() }
       return .json(200, ResultWrapper<String?>(result: nil))
-    case "triggerPreActionCheck":
+    case "prepareAction", "runAction":
       guard let stageRaw = body["stage"] as? String, let stage = PreActionStage(rawValue: stageRaw) else {
         return .empty(404)
       }
-      let preActionParams = PreActionCheckParams(
-        connection: runOnMain { instance.connection },
-        stage: stage, trustedKeyPEM: instance.publicKeyPEM)
-      // Fails open to "current" -- `checkPreAction` resolves `nil` on any
-      // network/signature failure, and a fail-open caller proceeds exactly
-      // as it would under a `current` Policy.
-      let policy = runBlocking(fallback: nil) { await checkPreAction(preActionParams) }
-      return .json(200, ResultWrapper(result: policy?.type ?? "current"))
+      if command == "prepareAction" {
+        runOnMain { instance.probe.prepare(stage: stage) }
+      } else {
+        runOnMain {
+          if stage == .preDownload { instance.runtime.downloadUpdate() }
+          else { instance.runtime.applyUpdate() }
+        }
+      }
+      runBlocking(fallback: ()) { await instance.runtime.waitForActions() }
+      return .json(200, ResultWrapper(result: runOnMain { instance.probe.activity }))
     case "getInternalDefectCount":
       guard let cause = body["cause"] as? String else { return .empty(404) }
       return .json(200, ResultWrapper(result: runOnMain { InternalDefects.counts(for: cause) }))
     case "injectEvent":
       let eventName = body["eventName"] as? String ?? ""
       let payload = body["payload"] as? [String: Any] ?? [:]
-      if asyncInjectEvents.contains(eventName) {
-        let settled = waitForSettledState(instance) {
-          dispatchInjectEvent(instance, eventName: eventName, payload: payload)
-        }
-        return .json(200, ResultWrapper(result: settled))
-      }
       runOnMain { dispatchInjectEvent(instance, eventName: eventName, payload: payload) }
       return .json(200, ResultWrapper<String?>(result: nil))
     default:

@@ -26,13 +26,16 @@ final class HostControl {
   // Set right before quitAndInstall(), so a `.failed` transition that
   // follows it synchronously is known to be this same apply attempt.
   private var awaitingApplyOutcome = false
+  private var stateChange: Task<Void, Never>?
 
   init(params: HostControlParams) {
     self.params = params
     params.adapter.onStateChange { [weak self] state in
-      Task { await self?.handleStateChange(state) }
+      self?.stateChange = Task { await self?.handleStateChange(state) }
     }
   }
+
+  func settled() async { await stateChange?.value }
 
   private func canProceed(stage: PreActionStage) async -> Bool {
     let policy = await checkPreAction(
