@@ -43,7 +43,8 @@ private func mockSession() -> URLSession {
       params: HostControlParams(
         connection: BackendConnection(baseURL: "https://example.com", credential: "cred", installationId: "install-1"),
         autoDownload: false,
-        getTrustedKeyPEM: { "key" }, adapter: adapter, session: mockSession()))
+        getTrustedKeyPEM: { "key" }, adapter: adapter, recordVersionExpectation: { _ in },
+        clearVersionExpectation: {}, session: mockSession()))
 
     await control.downloadUpdate()
     #expect(adapter.getAdapterState() == .idle)
@@ -56,7 +57,8 @@ private func mockSession() -> URLSession {
       params: HostControlParams(
         connection: BackendConnection(baseURL: "https://example.com", credential: "cred", installationId: "install-1"),
         autoDownload: false,
-        getTrustedKeyPEM: { "key" }, adapter: adapter, session: mockSession()))
+        getTrustedKeyPEM: { "key" }, adapter: adapter, recordVersionExpectation: { _ in },
+        clearVersionExpectation: {}, session: mockSession()))
 
     await control.applyUpdate()
     #expect(adapter.getAdapterState() == .idle)

@@ -5,6 +5,14 @@ struct HostControlParams: Sendable {
   var autoDownload: Bool
   var getTrustedKeyPEM: @Sendable () async -> String
   var adapter: SparkleUpdaterAdapter
+  /// Called with the version about to be applied, immediately before every
+  /// `quitAndInstall()` call -- the version-expectation marker a later
+  /// startup compares against to confirm the apply actually landed.
+  var recordVersionExpectation: @Sendable (String) async -> Void
+  /// Called when this session's own apply attempt already failed and was
+  /// classified -- clears the marker above so the next startup doesn't
+  /// also report it as an unexplained mismatch.
+  var clearVersionExpectation: @Sendable () async -> Void
   var log: (@Sendable (String) -> Void)?
   var session: URLSession = .shared
 }
@@ -15,6 +23,9 @@ struct HostControlParams: Sendable {
 @MainActor
 final class HostControl {
   private let params: HostControlParams
+  // Set right before quitAndInstall(), so a `.failed` transition that
+  // follows it synchronously is known to be this same apply attempt.
+  private var awaitingApplyOutcome = false
 
   init(params: HostControlParams) {
     self.params = params
@@ -42,6 +53,10 @@ final class HostControl {
     if case .available = state, params.autoDownload {
       await attemptDownload()
     }
+    if case .failed = state, awaitingApplyOutcome {
+      awaitingApplyOutcome = false
+      await params.clearVersionExpectation()
+    }
   }
 
   /// Host-triggered earlier download, for a host that set `autoDownload`
@@ -58,6 +73,10 @@ final class HostControl {
   func applyUpdate() async {
     guard case .downloaded = params.adapter.getAdapterState() else { return }
     if await canProceed(stage: .preApply) {
+      if let version = params.adapter.getTargetVersion() {
+        await params.recordVersionExpectation(version)
+        awaitingApplyOutcome = true
+      }
       params.adapter.quitAndInstall()
     }
   }

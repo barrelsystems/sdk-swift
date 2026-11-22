@@ -12,6 +12,7 @@ final class SparkleUpdaterAdapter: NSObject {
 
   private var state: AdapterState = .idle
   private var lastError: UpdateFailure?
+  private var targetVersion: String?
   private var onStateChangeListeners: [(AdapterState) -> Void] = []
 
   // Stored replies: full-wrap means the host's own pre-action-check gates
@@ -36,6 +37,14 @@ final class SparkleUpdaterAdapter: NSObject {
   }
 
   private func setState(_ newState: AdapterState) {
+    // Every cycle-ending state leaves no update still pending apply, so
+    // a stale target version can never carry into an unrelated later one.
+    switch newState {
+    case .idle, .updateCancelled, .failed:
+      targetVersion = nil
+    default:
+      break
+    }
     state = newState
     Task { await bufferedFactsStore.recordAdapterState(newState) }
     for listener in onStateChangeListeners { listener(newState) }
@@ -71,6 +80,9 @@ final class SparkleUpdaterAdapter: NSObject {
 
   func getAdapterState() -> AdapterState { state }
   func getLastUpdateError() -> UpdateFailure? { lastError }
+  /// The version currently available/downloaded, if any -- `nil` before
+  /// `showUpdateFound` has ever fired.
+  func getTargetVersion() -> String? { targetVersion }
 
   /// Host-control registers its own listener here; `BarrelKit.onStateChange`
   /// registers the host app's, so this must support more than one.
@@ -121,6 +133,10 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
     reply: @escaping (SPUUserUpdateChoice) -> Void
   ) {
     pendingUpdateReply = reply
+    // `displayVersionString` maps to `CFBundleShortVersionString`, the
+    // same field `collectEnvironment()` reads -- `versionString` maps to
+    // `CFBundleVersion` instead, which this adapter never compares against.
+    targetVersion = appcastItem.displayVersionString
     setState(.available(releaseNotes: appcastItem.itemDescription))
   }
 

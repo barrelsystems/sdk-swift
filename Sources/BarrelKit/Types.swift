@@ -102,6 +102,8 @@ public enum UpdateFailureMode: String, Sendable, Codable {
   case releaseNotesFailed = "release-notes-failed"
   /// Resuming the update feed after a prior failure didn't work.
   case resumeAppcastFailed = "resume-appcast-failed"
+  /// The app quit to apply an update, but never came back up on the new version.
+  case applyNotConfirmed = "apply-not-confirmed"
   /// An unclassified update failure occurred.
   case unknown = "unknown"
 }

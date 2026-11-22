@@ -17,6 +17,7 @@ public final class BarrelKit {
   private var bufferedFactsStore = BufferedFactsStore()
   private var installationIdStore = InstallationIdStore()
   private var trustedKeyStore = TrustedKeyStore()
+  private var versionExpectationStore = VersionExpectationStore()
   private var pendingStateChangeListeners: [(AdapterState) -> Void] = []
 
   public func initialize(_ config: InitConfig) throws {
@@ -50,11 +51,13 @@ public final class BarrelKit {
     let installationIdPath = dataDir.appendingPathComponent("barrel-installation.json").path
     let bufferedFactsPath = dataDir.appendingPathComponent("barrel-buffered-facts.json").path
     let trustedKeyPath = dataDir.appendingPathComponent("barrel-trusted-key.json").path
+    let versionExpectationPath = dataDir.appendingPathComponent("barrel-version-expectation.json").path
 
     Task {
       let installationId = await installationIdStore.getOrCreate(filePath: installationIdPath)
       await bufferedFactsStore.configure(filePath: bufferedFactsPath)
       _ = await trustedKeyStore.getOrCreate(filePath: trustedKeyPath, builtInKeyPEM: publicEd25519KeyPEM)
+      await checkVersionExpectation(filePath: versionExpectationPath)
       let newAdapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: bufferedFactsStore)
       if let updateFeedURL = config.updateFeedURL {
         newAdapter.setFeedURL(updateFeedURL)
@@ -70,7 +73,14 @@ public final class BarrelKit {
           connection: connection,
           autoDownload: autoDownload,
           getTrustedKeyPEM: { [self] in await self.trustedKeyStore.current() ?? publicEd25519KeyPEM },
-          adapter: newAdapter, log: debugLog))
+          adapter: newAdapter,
+          recordVersionExpectation: { [self] version in
+            await self.versionExpectationStore.set(filePath: versionExpectationPath, version: version)
+          },
+          clearVersionExpectation: { [self] in
+            await self.versionExpectationStore.clear(filePath: versionExpectationPath)
+          },
+          log: debugLog))
 
       startCadence(
         CadenceParams(
@@ -93,6 +103,22 @@ public final class BarrelKit {
           getPolicy: { [self] in self.lastKnownPolicy },
           holdCacheMaxAge: holdCacheMaxAge))
     }
+  }
+
+  /// Resolves what the previous session's apply attempt, if any,
+  /// expected to be running by now against what's actually running, then
+  /// clears the marker either way so this only ever fires once per attempt.
+  private func checkVersionExpectation(filePath: String) async {
+    guard let expectedVersion = await versionExpectationStore.read(filePath: filePath) else { return }
+
+    let runningVersion = collectEnvironment().observedVersion
+    if expectedVersion != runningVersion {
+      let (failure, _) = buildFailureState(
+        platform: "version-check", failureMode: .applyNotConfirmed, phase: .install,
+        platformCode: "expected \(expectedVersion), running \(runningVersion)")
+      await bufferedFactsStore.recordUpdateError(failure)
+    }
+    await versionExpectationStore.clear(filePath: filePath)
   }
 
   /// `nil` before the first successful check-in -- never a synthesized default.

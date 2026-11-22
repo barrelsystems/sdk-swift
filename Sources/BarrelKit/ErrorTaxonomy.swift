@@ -19,6 +19,7 @@ private let failureModeTitles: [UpdateFailureMode: String] = [
   .webkitTerminated: "The updater's WebKit process terminated unexpectedly.",
   .releaseNotesFailed: "The update's release notes could not be loaded.",
   .resumeAppcastFailed: "Resuming the update feed after a prior failure didn't work.",
+  .applyNotConfirmed: "The app quit to apply an update, but never came back up on the new version.",
   .unknown: "An unclassified update failure occurred.",
 ]
 
