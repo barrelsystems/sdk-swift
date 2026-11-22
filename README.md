@@ -71,8 +71,9 @@ immediately before every download and apply, separately from the
 30-minute cadence, so a Hold placed since the last check-in still has time
 to land.
 
-Every check-in reports `InitConfig.channel` verbatim (default: `"stable"`),
-without changing the updater's feed.
+Every check-in reports the channel key in `InitConfig.channel` verbatim
+(default: `"stable"`), without changing the updater's feed. Keys are
+case-sensitive; use the configured key rather than its display name.
 
 The SDK implements `SPUUserDriver` itself rather than sitting on the side
 as a passive `SPUUpdaterDelegate` observer, which is what lets it see every

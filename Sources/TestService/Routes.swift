@@ -19,6 +19,7 @@ final class AdapterInstance {
   // adapter-event scenarios never touch check-in.
   let checkInBaseURL: String
   let publicKeyPEM: String
+  let channel: String
   let installationId = UUID().uuidString.lowercased()
   // Guards `checkNow` against a concurrent attempt on this same instance --
   // a second attempt while one is already in flight is skipped, not queued.
@@ -28,21 +29,27 @@ final class AdapterInstance {
     BackendConnection(baseURL: checkInBaseURL, credential: "test-service", installationId: installationId)
   }
 
-  init(checkInBaseURL: String, publicKeyPEM: String) {
+  init(checkInBaseURL: String, publicKeyPEM: String, channel: String) {
     adapter = SparkleUpdaterAdapter(
       hostBundle: makeTestHostBundle(), bufferedFactsStore: BufferedFactsStore())
     adapter.setFeedURL("http://127.0.0.1:\(appcastPort)/appcast.xml")
     self.checkInBaseURL = checkInBaseURL
     self.publicKeyPEM = publicKeyPEM
+    self.channel = channel
   }
 }
 
 final class AdapterRegistry: @unchecked Sendable {
   private let adapters: Locked<[String: AdapterInstance]> = Locked([:])
 
-  func create(checkInBaseURL: String, publicKeyPEM: String) -> String {
+  func create(_ request: CreateAdapterRequest) -> String {
     let id = UUID().uuidString
-    let instance = runOnMain { AdapterInstance(checkInBaseURL: checkInBaseURL, publicKeyPEM: publicKeyPEM) }
+    let instance = runOnMain {
+      AdapterInstance(
+        checkInBaseURL: request.checkInBaseUrl, publicKeyPEM: request.publicKeyPem,
+        channel: request.channel ?? "stable")
+    }
+
     adapters.write { $0[id] = instance }
     return id
   }
@@ -69,8 +76,7 @@ func route(_ request: HttpRequest) -> HttpResponse {
     guard let createRequest = try? JSONDecoder().decode(CreateAdapterRequest.self, from: request.body) else {
       return .empty(404)
     }
-    let id = registry.create(
-      checkInBaseURL: createRequest.checkInBaseUrl, publicKeyPEM: createRequest.publicKeyPem)
+    let id = registry.create(createRequest)
     return .json(200, CreateAdapterResponse(id: id))
   }
 
@@ -110,7 +116,7 @@ func route(_ request: HttpRequest) -> HttpResponse {
       let adapterState = runOnMain { instance.adapter.getAdapterState() }
       let checkInParams = CheckInParams(
         connection: runOnMain { instance.connection },
-        sdkVersion: "0.0.1", channel: "stable", attributes: [:],
+        sdkVersion: "0.0.1", channel: runOnMain { instance.channel }, attributes: [:],
         adapterState: adapterState, bufferedFacts: [])
       let response = runBlocking(fallback: nil) { await sendCheckIn(checkInParams) }
       if let response {

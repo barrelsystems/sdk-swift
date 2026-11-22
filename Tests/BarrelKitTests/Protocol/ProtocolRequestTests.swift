@@ -49,12 +49,14 @@ private struct Body: Encodable { var value: String }
 
     MockURLProtocol.handler = { request in
       let data: Data
+
       if let body = request.httpBody {
         data = body
       } else {
         let stream = try #require(request.httpBodyStream)
         stream.open()
         defer { stream.close() }
+
         var bytes = [UInt8](repeating: 0, count: 4096)
         var body = Data()
 
@@ -79,6 +81,7 @@ private struct Body: Encodable { var value: String }
       connection: BackendConnection(baseURL: "https://example.com", credential: "cred", installationId: "install"),
       sdkVersion: "1.0.0", channel: config.channel, attributes: [:],
       adapterState: .idle, bufferedFacts: [], log: nil, session: mockSession()))
+
     #expect(response != nil)
   }
 
