@@ -8,6 +8,7 @@ import Sparkle
 final class SparkleUpdaterAdapter: NSObject {
   private var updater: SPUUpdater!
   private var feedURLOverride: String?
+  private let checkForUpdatesOverride: (() -> Void)?
   private let bufferedFactsStore: BufferedFactsStore
 
   private var state: AdapterState = .idle
@@ -24,7 +25,8 @@ final class SparkleUpdaterAdapter: NSObject {
   private var expectedContentLength: UInt64 = 0
   private var receivedContentLength: UInt64 = 0
 
-  init(hostBundle: Bundle, bufferedFactsStore: BufferedFactsStore) {
+  init(hostBundle: Bundle, bufferedFactsStore: BufferedFactsStore, checkForUpdates: (() -> Void)? = nil) {
+    self.checkForUpdatesOverride = checkForUpdates
     self.bufferedFactsStore = bufferedFactsStore
     super.init()
     updater = SPUUpdater(hostBundle: hostBundle, applicationBundle: hostBundle, userDriver: self, delegate: self)
@@ -51,7 +53,8 @@ final class SparkleUpdaterAdapter: NSObject {
   }
 
   func checkForUpdates() {
-    updater.checkForUpdates()
+    if let checkForUpdatesOverride { checkForUpdatesOverride() }
+    else { updater.checkForUpdates() }
   }
 
   /// Records an internal defect and no-ops if nothing is `available` yet
@@ -132,12 +135,15 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
     with appcastItem: SUAppcastItem, state updateState: SPUUserUpdateState,
     reply: @escaping (SPUUserUpdateChoice) -> Void
   ) {
+    handleUpdateFound(version: appcastItem.displayVersionString, releaseNotes: appcastItem.itemDescription, reply: reply)
+  }
+
+  // The native update-state argument cannot be constructed outside Sparkle.
+  // Keep its event's normalized values separate from that opaque argument.
+  func handleUpdateFound(version: String, releaseNotes: String?, reply: @escaping (SPUUserUpdateChoice) -> Void) {
     pendingUpdateReply = reply
-    // `displayVersionString` maps to `CFBundleShortVersionString`, the
-    // same field `collectEnvironment()` reads -- `versionString` maps to
-    // `CFBundleVersion` instead, which this adapter never compares against.
-    targetVersion = appcastItem.displayVersionString
-    setState(.available(releaseNotes: appcastItem.itemDescription))
+    targetVersion = version
+    setState(.available(releaseNotes: releaseNotes))
   }
 
   func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}

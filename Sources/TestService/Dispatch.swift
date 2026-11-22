@@ -2,38 +2,9 @@ import Foundation
 
 @testable import BarrelKit
 
-/// `onStateChange`'s listener fires on the main actor; a plain class
-/// (not an actor) is enough here since the background thread only reads
-/// it after the semaphore the listener signals has already been waited on.
-final class StateBox: @unchecked Sendable {
-  var state: AdapterState?
-}
-
-/// Hops onto the main actor's executor synchronously, from the HTTP
-/// server's own background thread, and back -- registration must stay
-/// quick so Sparkle's real async network check can call back later.
+/// Routes run on background threads; UI-adjacent adapter work stays on the main actor.
 func runOnMain<T: Sendable>(_ body: @escaping @MainActor () -> T) -> T {
   DispatchQueue.main.sync { MainActor.assumeIsolated(body) }
-}
-
-/// Blocks the calling (background) thread until `instance`'s state
-/// changes away from `.checking`, or `timeout` elapses. `updateFound`/
-/// `updateNotAvailable` currently always time out; see `dispatchInjectEvent`.
-func waitForSettledState(
-  _ instance: AdapterInstance, timeout: TimeInterval = 5, trigger: @escaping @MainActor () -> Void
-) -> AdapterState {
-  let semaphore = DispatchSemaphore(value: 0)
-  let box = StateBox()
-  runOnMain {
-    instance.adapter.onStateChange { newState in
-      if case .checking = newState { return }
-      box.state = newState
-      semaphore.signal()
-    }
-    trigger()
-  }
-  _ = semaphore.wait(timeout: .now() + timeout)
-  return box.state ?? .failed(category: .updater, code: .unknown, platformCode: "test-service-timeout")
 }
 
 /// Safe only because the calling thread is never one of Swift's own
@@ -60,11 +31,6 @@ func runBlocking<T: Sendable>(
   return result
 }
 
-/// `updateFound`/`updateNotAvailable` trigger a real, async Sparkle check;
-/// every other event is a synchronous direct call whose resulting state
-/// is already settled by the time this returns.
-let asyncInjectEvents: Set<String> = ["updateFound", "updateNotAvailable"]
-
 @MainActor
 func dispatchInjectEvent(_ instance: AdapterInstance, eventName: String, payload: [String: Any]) {
   let adapter = instance.adapter
@@ -72,18 +38,9 @@ func dispatchInjectEvent(_ instance: AdapterInstance, eventName: String, payload
   case "checking":
     adapter.showUserInitiatedUpdateCheck(cancellation: {})
   case "updateFound":
-    // KNOWN GAP: always times out -- `checkForUpdates()` never calls back
-    // in a bare SPM executable, and `showUpdateFound` itself is
-    // unreachable directly (`SPUUserUpdateState.init` is unavailable).
-    let releaseNotes = payload["releaseNotes"] as? String
-    appcastServer.setNextAppcastXML(
-      appcastXML(
-        version: "2.0.0", releaseNotes: releaseNotes, signature: "",
-        feedBaseURL: "http://127.0.0.1:\(appcastPort)"))
-    adapter.checkForUpdates()
+    instance.probe.offerUpdate(releaseNotes: payload["releaseNotes"] as? String)
   case "updateNotAvailable":
-    appcastServer.setNoUpdate()
-    adapter.checkForUpdates()
+    instance.probe.reportNoUpdate()
   case "downloadInitiated":
     adapter.showDownloadInitiated(cancellation: {})
   case "downloadProgress":

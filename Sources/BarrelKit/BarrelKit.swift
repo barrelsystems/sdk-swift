@@ -1,18 +1,35 @@
 import AppKit
 import Foundation
 
+@MainActor
+struct RuntimeEnvironment {
+  var hostBundle: Bundle = .main
+  var dataDirectory: URL?
+  var makeAdapter: (Bundle, BufferedFactsStore) -> SparkleUpdaterAdapter = {
+    SparkleUpdaterAdapter(hostBundle: $0, bufferedFactsStore: $1)
+  }
+  var scheduleCadence: @MainActor (CadenceParams) -> CadenceTicker = startCadence
+}
+
 /// The only required call. Silent until this runs, throws synchronously
 /// only for invalid config, and is a silent no-op on a second call --
 /// every later failure fails open instead of throwing.
 @MainActor
 public final class BarrelKit {
   public static let shared = BarrelKit()
-  private init() {}
+  private let environment: RuntimeEnvironment
+  private var initialization: Task<Void, Never>?
+  private var cadence: CadenceTicker?
+  private var action: Task<Void, Never>?
+
+  private init() { environment = RuntimeEnvironment() }
+
+  init(environment: RuntimeEnvironment) { self.environment = environment }
 
   private var initialized = false
   private var lastKnownPolicy: Policy?
   private var debugLog: (@Sendable (String) -> Void)?
-  private var adapter: SparkleUpdaterAdapter?
+  private(set) var adapter: SparkleUpdaterAdapter?
   private var hostControl: HostControl?
   private var bufferedFactsStore = BufferedFactsStore()
   private var installationIdStore = InstallationIdStore()
@@ -47,18 +64,18 @@ public final class BarrelKit {
 
     let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     let bundleId = Bundle.main.bundleIdentifier ?? "barrel-kit"
-    let dataDir = appSupport.appendingPathComponent(bundleId)
+    let dataDir = environment.dataDirectory ?? appSupport.appendingPathComponent(bundleId)
     let installationIdPath = dataDir.appendingPathComponent("barrel-installation.json").path
     let bufferedFactsPath = dataDir.appendingPathComponent("barrel-buffered-facts.json").path
     let trustedKeyPath = dataDir.appendingPathComponent("barrel-trusted-key.json").path
     let versionExpectationPath = dataDir.appendingPathComponent("barrel-version-expectation.json").path
 
-    Task {
+    initialization = Task {
       let installationId = await installationIdStore.getOrCreate(filePath: installationIdPath)
       await bufferedFactsStore.configure(filePath: bufferedFactsPath)
       _ = await trustedKeyStore.getOrCreate(filePath: trustedKeyPath, builtInKeyPEM: publicEd25519KeyPEM)
       await checkVersionExpectation(filePath: versionExpectationPath)
-      let newAdapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: bufferedFactsStore)
+      let newAdapter = environment.makeAdapter(environment.hostBundle, bufferedFactsStore)
       if let updateFeedURL = config.updateFeedURL {
         newAdapter.setFeedURL(updateFeedURL)
       }
@@ -82,7 +99,7 @@ public final class BarrelKit {
           },
           log: debugLog))
 
-      startCadence(
+      cadence = environment.scheduleCadence(
         CadenceParams(
           connection: connection,
           checkInInterval: checkInInterval, sdkVersion: sdkVersion, channel: config.channel, attributes: config.attributes,
@@ -94,15 +111,27 @@ public final class BarrelKit {
           onPolicyResponse: { [self] response in
             guard let response else { return }  // fail open -- keep the last-known Policy
             let trustedKeyPEM = await self.trustedKeyStore.current() ?? publicEd25519KeyPEM
-            if let parsed = verifyAndParsePolicy(response, publicKeyPEM: trustedKeyPEM) {
-              self.lastKnownPolicy = parsed
-            }
-            debugLog?(self.lastKnownPolicy != nil ? "policy: verified and updated" : "policy: verification failed")
+            let parsed = verifyAndParsePolicy(response, publicKeyPEM: trustedKeyPEM)
+            if let parsed { self.lastKnownPolicy = parsed }
+            debugLog?(parsed != nil ? "policy: verified and updated" : "policy: verification failed")
             await self.trustedKeyStore.applyRotationIfPresent(response)
           },
           getPolicy: { [self] in self.lastKnownPolicy },
           holdCacheMaxAge: holdCacheMaxAge))
     }
+  }
+
+  func ready() async { await initialization?.value }
+
+  func checkNow() async {
+    await ready()
+    await cadence?.tick()
+    await waitForActions()
+  }
+
+  func waitForActions() async {
+    await action?.value
+    await hostControl?.settled()
   }
 
   /// Resolves what the previous session's apply attempt, if any,
@@ -144,12 +173,12 @@ public final class BarrelKit {
 
   /// A silent no-op if the adapter isn't currently `available`.
   public func downloadUpdate() {
-    Task { await hostControl?.downloadUpdate() }
+    action = Task { await hostControl?.downloadUpdate() }
   }
 
   /// A silent no-op if the adapter hasn't finished `downloaded`-ing yet.
   public func applyUpdate() {
-    Task { await hostControl?.applyUpdate() }
+    action = Task { await hostControl?.applyUpdate() }
   }
 
   /// Call from the host app's own `NSApplicationDelegate.applicationShouldTerminate(_:)`

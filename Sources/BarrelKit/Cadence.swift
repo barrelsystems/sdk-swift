@@ -44,7 +44,8 @@ private func parseISO8601(_ string: String) -> Date? {
 /// Checks in on launch, then on a jittered interval, plus on
 /// resume-from-sleep and foreground-activation.
 @MainActor
-func startCadence(_ params: CadenceParams) {
+@discardableResult
+func startCadence(_ params: CadenceParams) -> CadenceTicker {
   if params.checkInInterval < minIntervalSeconds {
     params.log?(
       "cadence: requested interval \(params.checkInInterval)s is below the \(minIntervalSeconds)s floor, clamped")
@@ -67,9 +68,11 @@ func startCadence(_ params: CadenceParams) {
   NotificationCenter.default.addObserver(
     forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
   ) { _ in Task { await ticker.tick() } }
+
+  return ticker
 }
 
-private actor CadenceTicker {
+actor CadenceTicker {
   private let params: CadenceParams
   private var inFlight = false
 
