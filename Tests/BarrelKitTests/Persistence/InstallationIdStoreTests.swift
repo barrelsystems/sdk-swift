@@ -22,4 +22,20 @@ import Testing
     let second = await InstallationIdStore().getOrCreate(filePath: path)
     #expect(first == second)
   }
+  @Test func retriesTheSameCachedIdWhenStorageRecovers() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "barrel-id-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("installation.json")
+    try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+    let store = InstallationIdStore()
+    let first = await store.getOrCreate(filePath: path.path)
+    try FileManager.default.removeItem(at: path)
+
+    #expect(await store.getOrCreate(filePath: path.path) == first)
+    let saved = try JSONDecoder().decode([String: String].self, from: Data(contentsOf: path))
+    #expect(saved["installationId"] == first)
+  }
+
 }

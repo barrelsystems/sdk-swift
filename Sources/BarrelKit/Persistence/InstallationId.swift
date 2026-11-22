@@ -5,22 +5,36 @@ import Foundation
 /// the actor itself serializes concurrent callers onto one resolution.
 actor InstallationIdStore {
   private var cachedId: String?
+  private var pendingPersistence: Task<Void, Never>?
 
   func getOrCreate(filePath: String) async -> String {
-    if let cachedId { return cachedId }
-
-    if let existing = readExisting(filePath: filePath) {
+    if cachedId == nil, let existing = readExisting(filePath: filePath) {
       cachedId = existing
       return existing
     }
 
-    let id = UUID().uuidString.lowercased()
+    let id = cachedId ?? UUID().uuidString.lowercased()
     cachedId = id
-    if let data = try? JSONEncoder().encode(["installationId": id]) {
+    retryPersistence(filePath: filePath)
+    await waitForPendingPersistence()
+
+    return id
+  }
+
+  func retryPersistence(filePath: String) {
+    guard pendingPersistence == nil, let id = cachedId,
+      let data = try? JSONEncoder().encode(["installationId": id])
+    else { return }
+
+    pendingPersistence = Task {
       PersistenceWriter.persist(path: filePath, data: data)
       await PersistenceWriter.waitForPendingWrites()
+      pendingPersistence = nil
     }
-    return id
+  }
+
+  func waitForPendingPersistence() async {
+    await pendingPersistence?.value
   }
 
   private func readExisting(filePath: String) -> String? {

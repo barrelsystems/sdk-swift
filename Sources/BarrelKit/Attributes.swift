@@ -1,3 +1,5 @@
+import Foundation
+
 private let maxAttributeKeys = 20
 private let maxAttributeValueBytes = 256
 
@@ -20,7 +22,7 @@ private func truncateToByteLimit(_ value: String, maxBytes: Int) -> String {
     encoded.removeLast()
   }
   // Back off further if the cut landed mid-codepoint.
-  while !encoded.isEmpty, String(decoding: encoded, as: UTF8.self).utf8.count != encoded.count {
+  while !encoded.isEmpty, String(bytes: encoded, encoding: .utf8) == nil {
     encoded.removeLast()
   }
   return String(decoding: encoded, as: UTF8.self)

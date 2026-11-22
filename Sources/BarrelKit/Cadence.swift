@@ -13,6 +13,7 @@ struct CadenceParams: Sendable {
   var sdkVersion: String
   var channel: String
   var attributes: [String: String]
+  var retryInstallationPersistence: @Sendable () async -> Void
   var log: (@Sendable (String) -> Void)?
   var getAdapterState: @MainActor () -> AdapterState
   var getBufferedFacts: @Sendable () async -> [BufferedFact]
@@ -27,7 +28,9 @@ struct CadenceParams: Sendable {
 /// Only a confirmed `held` Policy still within its ceiling holds the check --
 /// the ceiling is the earlier of `holdCacheMaxAge` and the operator's own
 /// `until`, so a client stuck offline fails open instead of staying held forever.
-func policyHoldsTheVendorCheck(_ policy: Policy?, holdCacheMaxAge: TimeInterval, now: Date = Date()) -> Bool {
+func policyHoldsTheVendorCheck(_ policy: Policy?, holdCacheMaxAge: TimeInterval, now: Date = Date())
+  -> Bool
+{
   guard case .held(let issuedAt, _, _, let until) = policy else { return false }
   guard let issuedAtDate = parseISO8601(issuedAt) else { return false }
   if now.timeIntervalSince(issuedAtDate) > holdCacheMaxAge { return false }
@@ -48,7 +51,8 @@ private func parseISO8601(_ string: String) -> Date? {
 func startCadence(_ params: CadenceParams) -> CadenceTicker {
   if params.checkInInterval < minIntervalSeconds {
     params.log?(
-      "cadence: requested interval \(params.checkInInterval)s is below the \(minIntervalSeconds)s floor, clamped")
+      "cadence: requested interval \(params.checkInInterval)s is below the \(minIntervalSeconds)s floor, clamped"
+    )
   }
   let interval = max(params.checkInInterval, minIntervalSeconds)
   let jitterFraction = computeJitterFraction(installationId: params.connection.installationId)
@@ -56,25 +60,61 @@ func startCadence(_ params: CadenceParams) -> CadenceTicker {
 
   let ticker = CadenceTicker(params: params)
 
-  Task { await ticker.tick() }
-  Timer.scheduledTimer(withTimeInterval: jitteredInterval, repeats: true) { _ in
-    Task { await ticker.tick() }
+  let bindings = CadenceBindings(interval: jitteredInterval, ticker: ticker)
+  Task {
+    await ticker.attach(bindings: bindings)
+    await ticker.tick()
   }
 
-  NSWorkspace.shared.notificationCenter.addObserver(
-    forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-  ) { _ in Task { await ticker.tick() } }
-
-  NotificationCenter.default.addObserver(
-    forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-  ) { _ in Task { await ticker.tick() } }
-
   return ticker
+}
+
+@MainActor
+final class CadenceBindings {
+  let intervalMs: Double
+  private var timer: Timer?
+  private var wakeObserver: NSObjectProtocol?
+  private var activeObserver: NSObjectProtocol?
+
+  init(interval: TimeInterval, ticker: CadenceTicker) {
+    intervalMs = interval * 1000
+    timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+      Task { await ticker.tick() }
+    }
+    wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+    ) { _ in Task { await ticker.tick() } }
+    activeObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+    ) { _ in Task { await ticker.tick() } }
+  }
+
+  func stop() {
+    timer?.invalidate()
+    if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+    if let activeObserver { NotificationCenter.default.removeObserver(activeObserver) }
+    timer = nil
+    wakeObserver = nil
+    activeObserver = nil
+  }
 }
 
 actor CadenceTicker {
   private let params: CadenceParams
   private var inFlight = false
+  private var bindings: CadenceBindings?
+  private var stopped = false
+
+  func attach(bindings: CadenceBindings) async {
+    if stopped { await bindings.stop() } else { self.bindings = bindings }
+  }
+  func stop() async {
+    stopped = true
+    await bindings?.stop()
+    bindings = nil
+  }
+  func isChecking() -> Bool { inFlight }
+  func intervalMs() async -> Double? { await bindings?.intervalMs }
 
   init(params: CadenceParams) {
     self.params = params
@@ -83,12 +123,16 @@ actor CadenceTicker {
   // A tick that fires while the previous one is still in flight is
   // skipped, not queued -- overlapping attempts are impossible.
   func tick() async {
+    if stopped { return }
+
     if inFlight {
       params.log?("cadence: tick skipped, a check-in is already in flight")
       return
     }
     inFlight = true
     defer { inFlight = false }
+
+    await params.retryInstallationPersistence()
 
     // The vendor update-feed check piggybacks on this same cadence but
     // MUST NOT run while held -- a Hold gates the check itself, not just
