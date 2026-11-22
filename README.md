@@ -104,3 +104,5 @@ the normal Sparkle way via `SUFeedURL`.
 One: `Sparkle` itself, the thing being wrapped. Everything else —
 `CryptoKit`, `Foundation`, `AppKit` — is a system framework. This ships
 inside your app, so we keep the dependency list as short as we can.
+
+Source ownership is described in [Architecture](docs/architecture.md).

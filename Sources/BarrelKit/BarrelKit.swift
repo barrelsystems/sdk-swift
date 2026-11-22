@@ -31,7 +31,7 @@ public final class BarrelKit {
   private var debugLog: (@Sendable (String) -> Void)?
   private(set) var adapter: SparkleUpdaterAdapter?
   private var hostControl: HostControl?
-  private var bufferedFactsStore = BufferedFactsStore()
+  let bufferedFactsStore = BufferedFactsStore()
   private var installationIdStore = InstallationIdStore()
   private var trustedKeyStore = TrustedKeyStore()
   private var versionExpectationStore = VersionExpectationStore()

@@ -34,7 +34,7 @@ import Testing
     }
 
     #expect(facts.count == 1)
-    guard case .adapterState(let state, _, _, let occurrenceCount) = facts.first else {
+    guard case .adapterState(let state, _, _, let occurrenceCount, _) = facts.first else {
       Issue.record("expected an .adapterState fact, got \(String(describing: facts.first))")
       return
     }

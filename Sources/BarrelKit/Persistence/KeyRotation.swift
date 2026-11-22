@@ -54,7 +54,10 @@ actor TrustedKeyStore {
     cachedKeyPEM = nextPublicKeyPEM
     guard let filePath, let data = try? JSONEncoder().encode(["publicKeyPEM": nextPublicKeyPEM]) else { return }
 
-    let persistTask = Task { await DiskStore.persist(path: filePath, data: data) }
+    let persistTask = Task {
+      PersistenceWriter.persist(path: filePath, data: data)
+      await PersistenceWriter.waitForPendingWrites()
+    }
     rotationInFlight = persistTask
     await persistTask.value
   }

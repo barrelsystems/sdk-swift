@@ -1,3 +1,4 @@
+import BarrelKit
 import Foundation
 
 /// Mirrors the conformance harness's own normative wire shapes --
@@ -32,4 +33,10 @@ struct JitterFractionResponse: Encodable {
 /// actually returns rather than one fixed type.
 struct ResultWrapper<T: Encodable>: Encodable {
   let result: T
+}
+
+struct FactObservation: Codable, Sendable {
+  let kind: String
+  let state: AdapterState?
+  let platformCode: String?
 }

@@ -5,11 +5,11 @@ import Foundation
 /// those are resolved for local display, never meant to cross the wire.
 func toWireBufferedFact(_ fact: BufferedFact) -> WireBufferedFact {
   switch fact {
-  case .adapterState(let state, let first, let last, let count):
+  case .adapterState(let state, let first, let last, let count, _):
     return WireBufferedFact(
       kind: "adapterState", firstObservedAt: first, lastObservedAt: last, occurrenceCount: count,
       state: state, phase: nil, failureMode: nil, platformCode: nil)
-  case .updateError(let failure, let first, let last, let count):
+  case .updateError(let failure, let first, let last, let count, _):
     return WireBufferedFact(
       kind: "updateError", firstObservedAt: first, lastObservedAt: last, occurrenceCount: count,
       state: nil, phase: failure.phase, failureMode: failure.failureMode, platformCode: failure.platformCode)

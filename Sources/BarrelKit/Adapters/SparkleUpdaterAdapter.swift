@@ -99,7 +99,7 @@ final class SparkleUpdaterAdapter: NSObject {
   private func hydrateLastErrorFromBufferedFacts() async {
     guard lastError == nil else { return }
     let mostRecent = await bufferedFactsStore.snapshot().compactMap { fact -> (UpdateFailure, String)? in
-      guard case .updateError(let failure, _, let lastObservedAt, _) = fact else { return nil }
+      guard case .updateError(let failure, _, let lastObservedAt, _, _) = fact else { return nil }
       return (failure, lastObservedAt)
     }.max { $0.1 < $1.1 }?.0
     guard let mostRecent else { return }
