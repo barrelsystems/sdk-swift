@@ -42,6 +42,46 @@ private struct Body: Encodable { var value: String }
 // `MockURLProtocol.handler`, which races under Swift Testing's default
 // parallel execution.
 @Suite(.serialized) struct ProtocolRequestTests {
+  @Test(arguments: [nil, "Beta / Custom"] as [String?])
+  func sendsTheHostChannelOnCheckIn(channel: String?) async {
+    var config = InitConfig(credential: "cred")
+    if let channel { config.channel = channel }
+
+    MockURLProtocol.handler = { request in
+      let data: Data
+      if let body = request.httpBody {
+        data = body
+      } else {
+        let stream = try #require(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+        var bytes = [UInt8](repeating: 0, count: 4096)
+        var body = Data()
+
+        while stream.hasBytesAvailable {
+          let count = stream.read(&bytes, maxLength: bytes.count)
+          #expect(count >= 0)
+          if count <= 0 { break }
+
+          body.append(contentsOf: bytes.prefix(count))
+        }
+
+        data = body
+      }
+
+      let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+      #expect(json["channel"] as? String == (channel ?? "stable"))
+      return try jsonResponse(try #require(request.url), status: 200,
+        body: #"{"protocolVersion":1,"policy":"{}","signature":"sig"}"#)
+    }
+
+    let response = await sendCheckIn(CheckInParams(
+      connection: BackendConnection(baseURL: "https://example.com", credential: "cred", installationId: "install"),
+      sdkVersion: "1.0.0", channel: config.channel, attributes: [:],
+      adapterState: .idle, bufferedFacts: [], log: nil, session: mockSession()))
+    #expect(response != nil)
+  }
+
   @Test func decodesASuccessfulResponse() async {
     MockURLProtocol.handler = { request in
       try jsonResponse(

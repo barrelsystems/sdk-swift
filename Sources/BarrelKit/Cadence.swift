@@ -11,6 +11,7 @@ struct CadenceParams: Sendable {
   var connection: BackendConnection
   var checkInInterval: TimeInterval
   var sdkVersion: String
+  var channel: String
   var attributes: [String: String]
   var log: (@Sendable (String) -> Void)?
   var getAdapterState: @MainActor () -> AdapterState
@@ -101,7 +102,7 @@ private actor CadenceTicker {
     let response = await sendCheckIn(
       CheckInParams(
         connection: params.connection,
-        sdkVersion: params.sdkVersion, attributes: params.attributes,
+        sdkVersion: params.sdkVersion, channel: params.channel, attributes: params.attributes,
         adapterState: await MainActor.run { params.getAdapterState() },
         bufferedFacts: bufferedFacts, log: params.log))
 

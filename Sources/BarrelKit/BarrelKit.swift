@@ -85,7 +85,7 @@ public final class BarrelKit {
       startCadence(
         CadenceParams(
           connection: connection,
-          checkInInterval: checkInInterval, sdkVersion: sdkVersion, attributes: config.attributes,
+          checkInInterval: checkInInterval, sdkVersion: sdkVersion, channel: config.channel, attributes: config.attributes,
           log: debugLog,
           getAdapterState: { newAdapter.getAdapterState() },
           getBufferedFacts: { await self.bufferedFactsStore.snapshot() },

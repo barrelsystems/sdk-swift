@@ -110,7 +110,7 @@ func route(_ request: HttpRequest) -> HttpResponse {
       let adapterState = runOnMain { instance.adapter.getAdapterState() }
       let checkInParams = CheckInParams(
         connection: runOnMain { instance.connection },
-        sdkVersion: "0.0.1", attributes: [:],
+        sdkVersion: "0.0.1", channel: "stable", attributes: [:],
         adapterState: adapterState, bufferedFacts: [])
       let response = runBlocking(fallback: nil) { await sendCheckIn(checkInParams) }
       if let response {

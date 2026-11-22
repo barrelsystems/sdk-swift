@@ -19,10 +19,12 @@ func toWireBufferedFact(_ fact: BufferedFact) -> WireBufferedFact {
 struct CheckInParams: Sendable {
   var connection: BackendConnection
   var sdkVersion: String
+  var channel: String
   var attributes: [String: String]
   var adapterState: AdapterState
   var bufferedFacts: [BufferedFact]
   var log: (@Sendable (String) -> Void)?
+  var session: URLSession = .shared
 }
 
 /// Sends one check-in attempt with a bounded timeout. There is no retry loop
@@ -36,6 +38,7 @@ func sendCheckIn(_ params: CheckInParams) async -> CheckInResponse? {
     eventId: UUID().uuidString.lowercased(),
     checkedInAt: ISO8601DateFormatter().string(from: Date()),
     sdkVersion: params.sdkVersion,
+    channel: params.channel,
     observedVersion: env.observedVersion,
     platform: env.platform,
     arch: env.arch,
@@ -48,5 +51,5 @@ func sendCheckIn(_ params: CheckInParams) async -> CheckInResponse? {
   return await postProtocolRequest(
     PostProtocolRequestParams(
       baseURL: params.connection.baseURL, path: "check-in", credential: params.connection.credential, body: body,
-      label: "check-in", log: params.log))
+      label: "check-in", log: params.log, session: params.session))
 }

@@ -71,6 +71,9 @@ immediately before every download and apply, separately from the
 30-minute cadence, so a Hold placed since the last check-in still has time
 to land.
 
+Every check-in reports `InitConfig.channel` verbatim (default: `"stable"`),
+without changing the updater's feed.
+
 The SDK implements `SPUUserDriver` itself rather than sitting on the side
 as a passive `SPUUpdaterDelegate` observer, which is what lets it see every
 byte-level progress and checking signal instead of losing some of them.
@@ -91,7 +94,7 @@ never captured or sent anywhere, so one can never crash your app.
 
 ## What stays yours
 
-Channels, targeting, and rollout percentages live on Barrel's dashboard.
+Targeting and rollout percentages live on Barrel's dashboard.
 Your appcast and the binaries it points at are entirely yours, configured
 the normal Sparkle way via `SUFeedURL`.
 
