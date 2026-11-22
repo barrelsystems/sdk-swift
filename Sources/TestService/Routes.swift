@@ -30,6 +30,10 @@ func route(_ request: HttpRequest) -> HttpResponse {
       let command = body["command"] as? String
     else { return .empty(404) }
 
+    if let response = handleResilienceCommand(command, body: body, instance: instance) {
+      return response
+    }
+
     if let response = handleBufferCommand(command, body: body, instance: instance) {
       return response
     }

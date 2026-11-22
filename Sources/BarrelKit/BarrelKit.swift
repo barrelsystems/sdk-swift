@@ -8,6 +8,7 @@ struct RuntimeEnvironment {
   var makeAdapter: (Bundle, BufferedFactsStore) -> SparkleUpdaterAdapter = {
     SparkleUpdaterAdapter(hostBundle: $0, bufferedFactsStore: $1)
   }
+  var writeDebugLog: @Sendable (String) -> Void = { print("[barrel-kit] \($0)") }
   var scheduleCadence: @MainActor (CadenceParams) -> CadenceTicker = startCadence
 }
 
@@ -32,7 +33,7 @@ public final class BarrelKit {
   private(set) var adapter: SparkleUpdaterAdapter?
   private var hostControl: HostControl?
   let bufferedFactsStore = BufferedFactsStore()
-  private var installationIdStore = InstallationIdStore()
+  let installationIdStore = InstallationIdStore()
   private var trustedKeyStore = TrustedKeyStore()
   private var versionExpectationStore = VersionExpectationStore()
   private var pendingStateChangeListeners: [(AdapterState) -> Void] = []
@@ -52,7 +53,7 @@ public final class BarrelKit {
 
     initialized = true
     if config.debug {
-      debugLog = { message in print("[barrel-kit] \(message)") }
+      debugLog = environment.writeDebugLog
     } else {
       debugLog = nil
     }
@@ -103,6 +104,9 @@ public final class BarrelKit {
         CadenceParams(
           connection: connection,
           checkInInterval: checkInInterval, sdkVersion: sdkVersion, channel: config.channel, attributes: config.attributes,
+          retryInstallationPersistence: { [self] in
+            await self.installationIdStore.retryPersistence(filePath: installationIdPath)
+          },
           log: debugLog,
           getAdapterState: { newAdapter.getAdapterState() },
           getBufferedFacts: { await self.bufferedFactsStore.snapshot() },
@@ -128,6 +132,10 @@ public final class BarrelKit {
     await cadence?.tick()
     await waitForActions()
   }
+
+  func stopCadence() async { await cadence?.stop() }
+  func cadenceIsChecking() async -> Bool { await cadence?.isChecking() ?? false }
+  func cadenceIntervalMs() async -> Double? { await cadence?.intervalMs() }
 
   func waitForActions() async {
     await action?.value

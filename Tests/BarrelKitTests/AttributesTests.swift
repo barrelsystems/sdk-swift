@@ -18,4 +18,12 @@ import Testing
     #expect(result.utf8.count <= 256)
     #expect(!result.contains("\u{FFFD}"))
   }
+  @Test func neverSubstitutesReplacementTextForATruncatedFourByteCharacter() {
+    let value = "x" + String(repeating: "😀", count: 80)
+    let result = boundAttributes(["key": value])["key"] ?? ""
+    #expect(result.utf8.count <= 256)
+    #expect(!result.contains("\u{FFFD}"))
+    #expect(value.hasPrefix(result))
+  }
+
 }

@@ -14,6 +14,11 @@ struct CreateAdapterResponse: Encodable {
 }
 
 struct CreateAdapterRequest: Decodable {
+  let attributes: [String: String]?
+  let debug: Bool?
+  let checkInIntervalMs: Double?
+  let lifecycle: Bool?
+  let installationPersistence: String?
   let channel: String?
   let checkInBaseUrl: String
   let publicKeyPem: String
