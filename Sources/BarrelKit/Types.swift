@@ -22,8 +22,10 @@ public struct InitConfig: Sendable {
   /// Developer-configurable; the server-enforced floor is 15 minutes regardless of what's passed here.
   public var checkInInterval: TimeInterval?
   /// Arbitrary key-value pairs sent with every check-in, for segmenting
-  /// policy decisions (e.g. a release channel or cohort).
+  /// policy decisions (e.g. a cohort).
   public var attributes: [String: String]
+  /// The host app's release channel, reported verbatim. Defaults to "stable".
+  public var channel: String
   /// On by default. When off, a found update is never downloaded.
   public var autoDownload: Bool
   /// Off by default. Logs what the SDK is doing via `print` -- never noisy unless opted in.
@@ -42,6 +44,7 @@ public struct InitConfig: Sendable {
     baseURL: String? = nil,
     checkInInterval: TimeInterval? = nil,
     attributes: [String: String] = [:],
+    channel: String = "stable",
     autoDownload: Bool = true,
     debug: Bool = false,
     updateFeedURL: String? = nil,
@@ -51,6 +54,7 @@ public struct InitConfig: Sendable {
     self.baseURL = baseURL
     self.checkInInterval = checkInInterval
     self.attributes = attributes
+    self.channel = channel
     self.autoDownload = autoDownload
     self.debug = debug
     self.updateFeedURL = updateFeedURL
@@ -309,6 +313,7 @@ public struct CheckInRequest: Encodable, Sendable {
   /// ISO 8601, set at the moment this request is built.
   public var checkedInAt: String
   public var sdkVersion: String
+  public var channel: String
   /// The app version this installation is currently running.
   public var observedVersion: String
   public var platform: String

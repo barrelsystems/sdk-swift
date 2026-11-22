@@ -13,6 +13,7 @@ struct CreateAdapterResponse: Encodable {
 }
 
 struct CreateAdapterRequest: Decodable {
+  let channel: String?
   let checkInBaseUrl: String
   let publicKeyPem: String
   let variant: String?
