@@ -3,9 +3,15 @@ import Foundation
 private let maxBufferedFacts = 32
 private let terminalAdapterStates: Set<String> = ["downloaded", "failed", "update-cancelled"]
 
+// Identity survives snapshot copies, but is excluded from disk and wire encoding.
+// Separate observations can have identical values within one clock tick.
 public enum BufferedFact: Sendable, Equatable {
-  case adapterState(state: AdapterState, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int)
-  case updateError(failure: UpdateFailure, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int)
+  case adapterState(
+    state: AdapterState, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int,
+    observationID: UUID = UUID())
+  case updateError(
+    failure: UpdateFailure, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int,
+    observationID: UUID = UUID())
 }
 
 extension BufferedFact: Codable {
@@ -30,9 +36,11 @@ extension BufferedFact: Codable {
     case "adapterState":
       self = .adapterState(
         state: try container.decode(AdapterState.self, forKey: .state),
-        firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt, occurrenceCount: occurrenceCount)
+        firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt,
+        occurrenceCount: occurrenceCount)
     case "updateError":
-      let failureContainer = try container.nestedContainer(keyedBy: FailureCodingKeys.self, forKey: .failure)
+      let failureContainer = try container.nestedContainer(
+        keyedBy: FailureCodingKeys.self, forKey: .failure)
       let failureMode = try failureContainer.decode(UpdateFailureMode.self, forKey: .failureMode)
       let failure = UpdateFailure(
         phase: try failureContainer.decode(Phase.self, forKey: .phase),
@@ -42,7 +50,8 @@ extension BufferedFact: Codable {
         platformCode: try failureContainer.decode(String.self, forKey: .platformCode))
       self = .updateError(
         failure: failure,
-        firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt, occurrenceCount: occurrenceCount)
+        firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt,
+        occurrenceCount: occurrenceCount)
     default:
       throw DecodingError.dataCorruptedError(
         forKey: .kind, in: container, debugDescription: "Unknown BufferedFact kind \(kind)")
@@ -52,15 +61,16 @@ extension BufferedFact: Codable {
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     switch self {
-    case .adapterState(let state, let first, let last, let count):
+    case .adapterState(let state, let first, let last, let count, _):
       try container.encode("adapterState", forKey: .kind)
       try container.encode(state, forKey: .state)
       try container.encode(first, forKey: .firstObservedAt)
       try container.encode(last, forKey: .lastObservedAt)
       try container.encode(count, forKey: .occurrenceCount)
-    case .updateError(let failure, let first, let last, let count):
+    case .updateError(let failure, let first, let last, let count, _):
       try container.encode("updateError", forKey: .kind)
-      var failureContainer = container.nestedContainer(keyedBy: FailureCodingKeys.self, forKey: .failure)
+      var failureContainer = container.nestedContainer(
+        keyedBy: FailureCodingKeys.self, forKey: .failure)
       try failureContainer.encode(failure.phase, forKey: .phase)
       try failureContainer.encode(failure.failureMode, forKey: .failureMode)
       try failureContainer.encode(failure.platform, forKey: .platform)
@@ -73,17 +83,17 @@ extension BufferedFact: Codable {
 
   var firstObservedAt: String {
     switch self {
-    case .adapterState(_, let v, _, _), .updateError(_, let v, _, _): return v
+    case .adapterState(_, let v, _, _, _), .updateError(_, let v, _, _, _): return v
     }
   }
   var lastObservedAt: String {
     switch self {
-    case .adapterState(_, _, let v, _), .updateError(_, _, let v, _): return v
+    case .adapterState(_, _, let v, _, _), .updateError(_, _, let v, _, _): return v
     }
   }
   var occurrenceCount: Int {
     switch self {
-    case .adapterState(_, _, _, let v), .updateError(_, _, _, let v): return v
+    case .adapterState(_, _, _, let v, _), .updateError(_, _, _, let v, _): return v
     }
   }
 }
@@ -95,17 +105,30 @@ private struct Classification {
 
 private func classify(_ fact: BufferedFact) -> Classification {
   switch fact {
-  case .updateError(let failure, _, _, _):
+  case .updateError(let failure, _, _, _, _):
     return Classification(
-      discriminant: "updateError:\(failure.failureMode.rawValue):\(failure.platformCode)", priority: 1)
-  case .adapterState(let state, _, _, _):
-    if case .failed(_, let code, let platformCode) = state {
-      return Classification(discriminant: "adapterState:failed:\(code.rawValue):\(platformCode)", priority: 1)
+      discriminant:
+        "updateError:\(failure.phase.rawValue):\(failure.failureMode.rawValue):\(failure.platform):\(failure.platformCode)",
+      priority: 1)
+  case .adapterState(let state, _, _, _, _):
+    if case .failed(let category, let code, let platformCode) = state {
+      return Classification(
+        discriminant: "adapterState:failed:\(category.rawValue):\(code.rawValue):\(platformCode)",
+        priority: 1)
     }
+
     let typeKey = adapterStateTypeKey(state)
+    let discriminant: String
+
+    switch state {
+    case .downloading(let progress):
+      discriminant = "adapterState:downloading:\(String(describing: progress))"
+    case .available(let notes): discriminant = "adapterState:available:\(String(describing: notes))"
+    default: discriminant = "adapterState:\(typeKey)"
+    }
+
     return Classification(
-      discriminant: "adapterState:\(typeKey)",
-      priority: terminalAdapterStates.contains(typeKey) ? 1 : 0)
+      discriminant: discriminant, priority: terminalAdapterStates.contains(typeKey) ? 1 : 0)
   }
 }
 
@@ -121,16 +144,23 @@ private func adapterStateTypeKey(_ state: AdapterState) -> String {
   }
 }
 
-/// Appends observed facts, merging into a matching entry by discriminant,
+/// Appends observed facts, merging into the matching last entry,
 /// bounded at 32 with priority-and-recency eviction. Disk persistence only
 /// guards against a process restart -- it never gates normal operation.
 actor BufferedFactsStore {
   private var buffer: [BufferedFact] = []
   private var filePath: String?
+  private let now: @Sendable () -> String
+
+  init(now: @escaping @Sendable () -> String = { ISO8601DateFormatter().string(from: Date()) }) {
+    self.now = now
+  }
 
   private func persistBuffer() async {
-    guard let path = filePath, let data = try? JSONEncoder().encode(["facts": buffer]) else { return }
-    await DiskStore.persist(path: path, data: data)
+    guard let path = filePath, let data = try? JSONEncoder().encode(["facts": buffer]) else {
+      return
+    }
+    PersistenceWriter.persist(path: path, data: data)
   }
 
   /// Hydrates the in-memory buffer from disk. Call once at startup, before any fact is recorded.
@@ -154,21 +184,24 @@ actor BufferedFactsStore {
   }
 
   func recordAdapterState(_ state: AdapterState) async {
-    let now = ISO8601DateFormatter().string(from: Date())
-    await upsert(.adapterState(state: state, firstObservedAt: now, lastObservedAt: now, occurrenceCount: 1))
+    let now = now()
+    await upsert(
+      .adapterState(state: state, firstObservedAt: now, lastObservedAt: now, occurrenceCount: 1))
   }
 
   func recordUpdateError(_ failure: UpdateFailure) async {
-    let now = ISO8601DateFormatter().string(from: Date())
-    await upsert(.updateError(failure: failure, firstObservedAt: now, lastObservedAt: now, occurrenceCount: 1))
+    let now = now()
+    await upsert(
+      .updateError(failure: failure, firstObservedAt: now, lastObservedAt: now, occurrenceCount: 1))
   }
 
   private func upsert(_ candidate: BufferedFact) async {
     let classification = classify(candidate)
-    if let existingIndex = buffer.firstIndex(where: { classify($0).discriminant == classification.discriminant }) {
-      let existing = buffer[existingIndex]
+    if let existing = buffer.last, classify(existing).discriminant == classification.discriminant {
+      let existingIndex = buffer.count - 1
       buffer[existingIndex] = withMergedTimestamps(
-        candidate, firstObservedAt: existing.firstObservedAt, occurrenceCount: existing.occurrenceCount + 1)
+        candidate, firstObservedAt: existing.firstObservedAt,
+        occurrenceCount: existing.occurrenceCount + 1)
       await persistBuffer()
       return
     }
@@ -189,12 +222,14 @@ actor BufferedFactsStore {
     _ fact: BufferedFact, firstObservedAt: String, occurrenceCount: Int
   ) -> BufferedFact {
     switch fact {
-    case .adapterState(let state, _, let last, _):
+    case .adapterState(let state, _, let last, _, _):
       return .adapterState(
-        state: state, firstObservedAt: firstObservedAt, lastObservedAt: last, occurrenceCount: occurrenceCount)
-    case .updateError(let failure, _, let last, _):
+        state: state, firstObservedAt: firstObservedAt, lastObservedAt: last,
+        occurrenceCount: occurrenceCount)
+    case .updateError(let failure, _, let last, _, _):
       return .updateError(
-        failure: failure, firstObservedAt: firstObservedAt, lastObservedAt: last, occurrenceCount: occurrenceCount)
+        failure: failure, firstObservedAt: firstObservedAt, lastObservedAt: last,
+        occurrenceCount: occurrenceCount)
     }
   }
 
@@ -209,7 +244,8 @@ actor BufferedFactsStore {
       let factPriority = classify(fact).priority
       let worstPriority = classify(worst).priority
       let isWorse =
-        factPriority < worstPriority || (factPriority == worstPriority && fact.lastObservedAt < worst.lastObservedAt)
+        factPriority < worstPriority
+        || (factPriority == worstPriority && fact.lastObservedAt < worst.lastObservedAt)
       if isWorse { worstIndex = index }
     }
     return worstIndex

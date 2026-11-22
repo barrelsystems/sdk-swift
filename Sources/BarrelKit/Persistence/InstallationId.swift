@@ -17,7 +17,8 @@ actor InstallationIdStore {
     let id = UUID().uuidString.lowercased()
     cachedId = id
     if let data = try? JSONEncoder().encode(["installationId": id]) {
-      await DiskStore.persist(path: filePath, data: data)
+      PersistenceWriter.persist(path: filePath, data: data)
+      await PersistenceWriter.waitForPendingWrites()
     }
     return id
   }

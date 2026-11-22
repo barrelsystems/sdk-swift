@@ -15,14 +15,16 @@ actor VersionExpectationStore {
   /// Call immediately before triggering apply, with the version being applied.
   func set(filePath: String, version: String) async {
     if let data = try? JSONEncoder().encode(["expectedVersion": version]) {
-      await DiskStore.persist(path: filePath, data: data)
+      PersistenceWriter.persist(path: filePath, data: data)
+      await PersistenceWriter.waitForPendingWrites()
     }
   }
 
   /// Call once the current startup's expectation has been resolved either way.
   func clear(filePath: String) async {
     if let data = try? JSONEncoder().encode([String: String]()) {
-      await DiskStore.persist(path: filePath, data: data)
+      PersistenceWriter.persist(path: filePath, data: data)
+      await PersistenceWriter.waitForPendingWrites()
     }
   }
 }
