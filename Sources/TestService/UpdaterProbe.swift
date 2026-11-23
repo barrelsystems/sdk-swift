@@ -26,13 +26,18 @@ final class UpdaterProbe {
 
   func reportNoUpdate() {
     available = false
-    adapter?.showUpdateNotFoundWithError(NSError(domain: "SUSparkleErrorDomain", code: Int(SUError.noUpdateError.rawValue)), acknowledgement: {})
+    adapter?.showUpdateNotFoundWithError(
+      NSError(domain: "SUSparkleErrorDomain", code: Int(SUError.noUpdateError.rawValue)),
+      acknowledgement: {})
   }
 
   func offerUpdate(releaseNotes: String? = nil) {
     available = true
     adapter?.handleUpdateFound(version: "2.0.0", releaseNotes: releaseNotes) { [weak self] choice in
-      if choice == .install { self?.activity.downloads += 1 }
+      if choice == .install {
+        self?.activity.downloads += 1
+        self?.adapter?.showReady(toInstallAndRelaunch: { _ in })
+      }
     }
   }
 

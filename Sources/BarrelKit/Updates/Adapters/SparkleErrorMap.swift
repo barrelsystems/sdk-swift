@@ -3,7 +3,7 @@ import Sparkle
 /// Maps Sparkle's finite `SUError` codes onto this SDK's cross-platform
 /// taxonomy. `SUNoUpdateError`/`SUInstallationCanceledError` are
 /// deliberately absent -- non-failures the adapter special-cases first.
-func mapSparkleError(_ code: OSStatus) -> (phase: Phase, failureMode: UpdateFailureMode) {
+func mapSparkleError(_ code: OSStatus) -> (phase: Updates.Phase, failureMode: Updates.FailureMode) {
   switch code {
   // Signature verification
   case SUError.noPublicDSAFoundError.rawValue,
@@ -123,7 +123,9 @@ func knownSparkleErrorCodes() -> [OSStatus] {
 /// `.onLatestVersion`/`.onNewerThanLatestVersion` mean genuinely current;
 /// `.unknown` only means no reason was attached, not that it is. The other
 /// three mean an update exists in the feed that this host can never take.
-func mapSparkleNoUpdateFoundReason(_ reason: SPUNoUpdateFoundReason) -> (phase: Phase, failureMode: UpdateFailureMode)? {
+func mapSparkleNoUpdateFoundReason(_ reason: SPUNoUpdateFoundReason) -> (
+  phase: Updates.Phase, failureMode: Updates.FailureMode
+)? {
   switch reason {
   case .systemIsTooOld, .systemIsTooNew, .hardwareDoesNotSupportARM64:
     return (.config, .platformUnsupported)
@@ -137,14 +139,17 @@ func mapSparkleNoUpdateFoundReason(_ reason: SPUNoUpdateFoundReason) -> (phase: 
 private let noUpdateFoundReasonNamesByCode: [OSStatus: String] = [
   SPUNoUpdateFoundReason.unknown.rawValue: "SPUNoUpdateFoundReasonUnknown",
   SPUNoUpdateFoundReason.onLatestVersion.rawValue: "SPUNoUpdateFoundReasonOnLatestVersion",
-  SPUNoUpdateFoundReason.onNewerThanLatestVersion.rawValue: "SPUNoUpdateFoundReasonOnNewerThanLatestVersion",
+  SPUNoUpdateFoundReason.onNewerThanLatestVersion.rawValue:
+    "SPUNoUpdateFoundReasonOnNewerThanLatestVersion",
   SPUNoUpdateFoundReason.systemIsTooOld.rawValue: "SPUNoUpdateFoundReasonSystemIsTooOld",
   SPUNoUpdateFoundReason.systemIsTooNew.rawValue: "SPUNoUpdateFoundReasonSystemIsTooNew",
-  SPUNoUpdateFoundReason.hardwareDoesNotSupportARM64.rawValue: "SPUNoUpdateFoundReasonHardwareDoesNotSupportARM64",
+  SPUNoUpdateFoundReason.hardwareDoesNotSupportARM64.rawValue:
+    "SPUNoUpdateFoundReasonHardwareDoesNotSupportARM64",
 ]
 
 func noUpdateFoundReasonCaseName(_ reason: SPUNoUpdateFoundReason) -> String {
-  noUpdateFoundReasonNamesByCode[reason.rawValue] ?? "SPUNoUpdateFoundReasonUnknown(\(reason.rawValue))"
+  noUpdateFoundReasonNamesByCode[reason.rawValue]
+    ?? "SPUNoUpdateFoundReasonUnknown(\(reason.rawValue))"
 }
 
 /// Looks up a named `SUError` by its real case name, for scenarios that

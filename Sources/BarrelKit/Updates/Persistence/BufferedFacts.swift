@@ -1,16 +1,18 @@
 import Foundation
 
 private let maxBufferedFacts = 32
-private let terminalAdapterStates: Set<String> = ["downloaded", "failed", "update-cancelled"]
+private let terminalUpdateStates: Set<String> = [
+  "downloaded", "applying", "failed", "update-cancelled",
+]
 
 // Identity survives snapshot copies, but is excluded from disk and wire encoding.
 // Separate observations can have identical values within one clock tick.
-public enum BufferedFact: Sendable, Equatable {
-  case adapterState(
-    state: AdapterState, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int,
+enum BufferedFact: Sendable, Equatable {
+  case lifecycleState(
+    state: Updates.State, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int,
     observationID: UUID = UUID())
   case updateError(
-    failure: UpdateFailure, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int,
+    failure: Updates.Failure, firstObservedAt: String, lastObservedAt: String, occurrenceCount: Int,
     observationID: UUID = UUID())
 }
 
@@ -19,31 +21,31 @@ extension BufferedFact: Codable {
     case kind, state, failure, firstObservedAt, lastObservedAt, occurrenceCount
   }
 
-  // `UpdateFailure.title` is a display string resolved from a static
+  // `Updates.Failure.title` is a display string resolved from a static
   // lookup table -- it must never reach disk. These keys exclude it, so
   // encoding `.updateError` can't accidentally persist it.
   private enum FailureCodingKeys: String, CodingKey {
     case phase, failureMode, platform, platformCode
   }
 
-  public init(from decoder: Decoder) throws {
+  init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let kind = try container.decode(String.self, forKey: .kind)
     let firstObservedAt = try container.decode(String.self, forKey: .firstObservedAt)
     let lastObservedAt = try container.decode(String.self, forKey: .lastObservedAt)
     let occurrenceCount = try container.decode(Int.self, forKey: .occurrenceCount)
     switch kind {
-    case "adapterState":
-      self = .adapterState(
-        state: try container.decode(AdapterState.self, forKey: .state),
+    case "lifecycleState":
+      self = .lifecycleState(
+        state: try container.decode(Updates.State.self, forKey: .state),
         firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt,
         occurrenceCount: occurrenceCount)
     case "updateError":
       let failureContainer = try container.nestedContainer(
         keyedBy: FailureCodingKeys.self, forKey: .failure)
-      let failureMode = try failureContainer.decode(UpdateFailureMode.self, forKey: .failureMode)
-      let failure = UpdateFailure(
-        phase: try failureContainer.decode(Phase.self, forKey: .phase),
+      let failureMode = try failureContainer.decode(Updates.FailureMode.self, forKey: .failureMode)
+      let failure = Updates.Failure(
+        phase: try failureContainer.decode(Updates.Phase.self, forKey: .phase),
         failureMode: failureMode,
         title: resolveFailureTitle(failureMode),  // re-derived, never read back from disk
         platform: try failureContainer.decode(String.self, forKey: .platform),
@@ -58,11 +60,11 @@ extension BufferedFact: Codable {
     }
   }
 
-  public func encode(to encoder: Encoder) throws {
+  func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     switch self {
-    case .adapterState(let state, let first, let last, let count, _):
-      try container.encode("adapterState", forKey: .kind)
+    case .lifecycleState(let state, let first, let last, let count, _):
+      try container.encode("lifecycleState", forKey: .kind)
       try container.encode(state, forKey: .state)
       try container.encode(first, forKey: .firstObservedAt)
       try container.encode(last, forKey: .lastObservedAt)
@@ -83,17 +85,17 @@ extension BufferedFact: Codable {
 
   var firstObservedAt: String {
     switch self {
-    case .adapterState(_, let v, _, _, _), .updateError(_, let v, _, _, _): return v
+    case .lifecycleState(_, let v, _, _, _), .updateError(_, let v, _, _, _): return v
     }
   }
   var lastObservedAt: String {
     switch self {
-    case .adapterState(_, _, let v, _, _), .updateError(_, _, let v, _, _): return v
+    case .lifecycleState(_, _, let v, _, _), .updateError(_, _, let v, _, _): return v
     }
   }
   var occurrenceCount: Int {
     switch self {
-    case .adapterState(_, _, _, let v, _), .updateError(_, _, _, let v, _): return v
+    case .lifecycleState(_, _, _, let v, _), .updateError(_, _, _, let v, _): return v
     }
   }
 }
@@ -110,35 +112,37 @@ private func classify(_ fact: BufferedFact) -> Classification {
       discriminant:
         "updateError:\(failure.phase.rawValue):\(failure.failureMode.rawValue):\(failure.platform):\(failure.platformCode)",
       priority: 1)
-  case .adapterState(let state, _, _, _, _):
+  case .lifecycleState(let state, _, _, _, _):
     if case .failed(let category, let code, let platformCode) = state {
       return Classification(
-        discriminant: "adapterState:failed:\(category.rawValue):\(code.rawValue):\(platformCode)",
+        discriminant: "lifecycleState:failed:\(category.rawValue):\(code.rawValue):\(platformCode)",
         priority: 1)
     }
 
-    let typeKey = adapterStateTypeKey(state)
+    let typeKey = lifecycleStateTypeKey(state)
     let discriminant: String
 
     switch state {
     case .downloading(let progress):
-      discriminant = "adapterState:downloading:\(String(describing: progress))"
-    case .available(let notes): discriminant = "adapterState:available:\(String(describing: notes))"
-    default: discriminant = "adapterState:\(typeKey)"
+      discriminant = "lifecycleState:downloading:\(String(describing: progress))"
+    case .available(let notes):
+      discriminant = "lifecycleState:available:\(String(describing: notes))"
+    default: discriminant = "lifecycleState:\(typeKey)"
     }
 
     return Classification(
-      discriminant: discriminant, priority: terminalAdapterStates.contains(typeKey) ? 1 : 0)
+      discriminant: discriminant, priority: terminalUpdateStates.contains(typeKey) ? 1 : 0)
   }
 }
 
-private func adapterStateTypeKey(_ state: AdapterState) -> String {
+private func lifecycleStateTypeKey(_ state: Updates.State) -> String {
   switch state {
   case .idle: return "idle"
   case .checking: return "checking"
   case .available: return "available"
   case .downloading: return "downloading"
   case .downloaded: return "downloaded"
+  case .applying: return "applying"
   case .updateCancelled: return "update-cancelled"
   case .failed: return "failed"
   }
@@ -183,13 +187,13 @@ actor BufferedFactsStore {
     await persistBuffer()
   }
 
-  func recordAdapterState(_ state: AdapterState) async {
+  func recordUpdateState(_ state: Updates.State) async {
     let now = now()
     await upsert(
-      .adapterState(state: state, firstObservedAt: now, lastObservedAt: now, occurrenceCount: 1))
+      .lifecycleState(state: state, firstObservedAt: now, lastObservedAt: now, occurrenceCount: 1))
   }
 
-  func recordUpdateError(_ failure: UpdateFailure) async {
+  func recordUpdateError(_ failure: Updates.Failure) async {
     let now = now()
     await upsert(
       .updateError(failure: failure, firstObservedAt: now, lastObservedAt: now, occurrenceCount: 1))
@@ -222,8 +226,8 @@ actor BufferedFactsStore {
     _ fact: BufferedFact, firstObservedAt: String, occurrenceCount: Int
   ) -> BufferedFact {
     switch fact {
-    case .adapterState(let state, _, let last, _, _):
-      return .adapterState(
+    case .lifecycleState(let state, _, let last, _, _):
+      return .lifecycleState(
         state: state, firstObservedAt: firstObservedAt, lastObservedAt: last,
         occurrenceCount: occurrenceCount)
     case .updateError(let failure, _, let last, _, _):

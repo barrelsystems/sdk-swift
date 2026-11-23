@@ -13,7 +13,7 @@ struct HttpRequest {
 }
 
 /// Generous headroom over any real body this service's routes expect
-/// (base64 keys, check-in/policy JSON, event payloads -- all well under a
+/// (base64 keys, check-in/eligibility JSON, event payloads -- all well under a
 /// few KB), while still bounding a harness-controlled `Content-Length`.
 private let maxRequestBodyBytes = 1 << 20  // 1 MiB
 
@@ -62,7 +62,7 @@ final class MinimalHttpServer: @unchecked Sendable {
 
     var address = sockaddr_in()
     address.sin_family = sa_family_t(AF_INET)
-    address.sin_addr.s_addr = INADDR_ANY
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
     address.sin_port = 0  // ask the OS for a free port
     let bindResult = withUnsafePointer(to: &address) { pointer in
       pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
@@ -89,6 +89,11 @@ final class MinimalHttpServer: @unchecked Sendable {
       guard client >= 0 else { continue }
       DispatchQueue.global().async { [self] in
         defer { close(client) }
+        var timeout = timeval(tv_sec: 15, tv_usec: 0)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var noSignal: Int32 = 1
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
         guard let request = readRequest(from: client) else { return }
         let response = handler(request)
         writeResponse(response, to: client)
@@ -105,6 +110,8 @@ final class MinimalHttpServer: @unchecked Sendable {
       let bytesRead = recv(socket, &chunk, chunk.count, 0)
       if bytesRead <= 0 { return nil }
       buffer.append(chunk, count: bytesRead)
+      guard buffer.count <= 64 * 1024 else { return nil }
+
       headerEnd = buffer.range(of: Data("\r\n\r\n".utf8))
     }
 
@@ -127,13 +134,13 @@ final class MinimalHttpServer: @unchecked Sendable {
     // The harness controls this header -- bound it well before the body
     // reaches any `JSONDecoder`/`JSONSerialization` call downstream, so a
     // bogus huge value can't drive unbounded memory growth here.
-    guard contentLength <= maxRequestBodyBytes else { return nil }
+    guard contentLength >= 0 && contentLength <= maxRequestBodyBytes else { return nil }
 
     var body = Data(buffer[headerEnd.upperBound...])
     while body.count < contentLength {
       var chunk = [UInt8](repeating: 0, count: 4096)
       let bytesRead = recv(socket, &chunk, chunk.count, 0)
-      if bytesRead <= 0 { break }
+      if bytesRead <= 0 { return nil }
       body.append(chunk, count: bytesRead)
     }
 
@@ -150,7 +157,15 @@ final class MinimalHttpServer: @unchecked Sendable {
     var payload = Data(head.utf8)
     payload.append(response.body)
     payload.withUnsafeBytes { bytes in
-      _ = send(socket, bytes.baseAddress, bytes.count, 0)
+      guard let base = bytes.baseAddress else { return }
+      var offset = 0
+      while offset < bytes.count {
+        let count = send(socket, base.advanced(by: offset), bytes.count - offset, 0)
+        if count < 0 && errno == EINTR { continue }
+        guard count > 0 else { return }
+
+        offset += count
+      }
     }
   }
 

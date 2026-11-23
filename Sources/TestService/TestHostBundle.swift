@@ -22,7 +22,9 @@ func makeTestHostBundle() -> Bundle {
     "NSAppTransportSecurity": ["NSAllowsLocalNetworking": true],
   ]
 
-  guard let plistData = try? PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+  guard
+    let plistData = try? PropertyListSerialization.data(
+      fromPropertyList: info, format: .xml, options: 0)
   else {
     fatalError("test-service: could not serialize the throwaway host bundle's Info.plist")
   }
@@ -33,7 +35,8 @@ func makeTestHostBundle() -> Bundle {
   }
 
   guard let bundle = Bundle(url: directory) else {
-    fatalError("test-service: Bundle(url:) returned nil for the just-written host bundle at \(directory)")
+    fatalError(
+      "test-service: Bundle(url:) returned nil for the just-written host bundle at \(directory)")
   }
   return bundle
 }

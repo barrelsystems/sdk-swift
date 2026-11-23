@@ -1,6 +1,6 @@
 import Foundation
 
-/// Thrown synchronously by `init()`, and only by `init()` -- every later failure fails open instead.
+/// Invalid initialization settings that the application can correct.
 public struct BarrelConfigError: Error, LocalizedError {
   private let message: String
   public init(_ message: String) { self.message = message }

@@ -20,12 +20,55 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Swift style
+        run: xcrun swift-format lint --strict --recursive Sources Tests Examples
+
       - name: Build
-        run: swift build
+        run: swift build -Xswiftc -warnings-as-errors
 
       - name: Test
-        run: swift test
+        run: swift test -Xswiftc -warnings-as-errors
 
       - name: Build example app
         working-directory: Examples/BasicSwiftApp
-        run: swift build
+        run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Checkout the conformance harness's built dist branch
+        uses: actions/checkout@v7
+        with:
+          repository: barrelsystems/sdk-conformance-harness
+          ref: dist
+          path: sdk-conformance-harness
+
+      - name: Install the conformance harness's runtime dependencies
+        working-directory: sdk-conformance-harness
+        run: npm install --omit=dev
+
+      - name: Run conformance
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/test-service.log"
+          ./.build/debug/TestService > "$log" 2>&1 &
+          service_pid=$!
+          trap 'kill "$service_pid" 2>/dev/null || true' EXIT
+          for _ in {1..100}; do
+            url=$(grep -oE 'http://(127.0.0.1|localhost):[0-9]+' "$log" | tail -1 || true)
+            [ -n "$url" ] && break
+            kill -0 "$service_pid" 2>/dev/null || { cat "$log"; exit 1; }
+            sleep 0.2
+          done
+          if [ -z "$url" ]; then
+            cat "$log"
+            echo "::error::Test service did not become ready"
+            exit 1
+          fi
+          node sdk-conformance-harness/dist/cli.js conformance "$url" --junit "$RUNNER_TEMP/conformance.xml" --history "$RUNNER_TEMP/conformance-history.json"
+
+      - name: Show test-service diagnostics
+        if: failure()
+        run: cat "$RUNNER_TEMP/test-service.log" 2>/dev/null || true

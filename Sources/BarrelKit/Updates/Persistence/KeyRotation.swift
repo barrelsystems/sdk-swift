@@ -5,15 +5,13 @@ import Foundation
 actor TrustedKeyStore {
   private var cachedKeyPEM: String?
   private var filePath: String?
-  // Actors are reentrant across an `await` -- without this, a second
-  // `applyRotationIfPresent` could run its own guard checks and disk
-  // write interleaved with this one's, leaving disk out of sync with
-  // whichever call's in-memory update happened to land last.
+  // Serialize rotations across actor suspension so concurrent responses cannot validate
+  // against stale trust.
   private var rotationInFlight: Task<Void, Never>?
 
   /// Resolves the key in effect at startup: a previously-adopted rotation
   /// cached on disk, or the build-time default otherwise. Call once, before
-  /// the first check-in's Policy is verified.
+  /// the first check-in's update eligibility is verified.
   func getOrCreate(filePath: String, builtInKeyPEM: String) async -> String {
     self.filePath = filePath
 
@@ -35,10 +33,7 @@ actor TrustedKeyStore {
   /// Verifies a rotation announcement against the key this SDK ALREADY
   /// trusts, never the new key -- a key can only vouch for its own successor.
   func applyRotationIfPresent(_ response: CheckInResponse) async {
-    // Wait for any rotation already in flight to fully finish (memory AND
-    // disk) before this call reads `cachedKeyPEM` or writes its own --
-    // otherwise two overlapping calls could get their disk writes done
-    // out of order relative to the in-memory key they end up agreeing on.
+    // Finish an active rotation before reading or updating trusted memory and disk state.
     await rotationInFlight?.value
 
     guard
@@ -49,10 +44,12 @@ actor TrustedKeyStore {
       let signatureData = Data(base64Encoded: nextPublicKeySignature),
       currentPublicKey.isValidSignature(signatureData, for: Data(nextPublicKeyPEM.utf8)),
       ed25519PublicKey(fromPEM: nextPublicKeyPEM) != nil  // validates the new key material parses
-    else { return }  // fails open: malformed key material or a bad signature leaves the current key in effect
+    // fails open: malformed key material or a bad signature leaves the current key in effect
+    else { return }
 
     cachedKeyPEM = nextPublicKeyPEM
-    guard let filePath, let data = try? JSONEncoder().encode(["publicKeyPEM": nextPublicKeyPEM]) else { return }
+    guard let filePath, let data = try? JSONEncoder().encode(["publicKeyPEM": nextPublicKeyPEM])
+    else { return }
 
     let persistTask = Task {
       PersistenceWriter.persist(path: filePath, data: data)

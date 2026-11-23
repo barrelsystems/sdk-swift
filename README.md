@@ -1,108 +1,102 @@
-# BarrelKit
+# Barrel for Swift
 
-Barrel's release-intelligence SDK for Swift/Sparkle apps on macOS. It
-implements Sparkle's `SPUUserDriver` headlessly, with no UI of its own, so
-your app never calls Sparkle directly — and reports what actually happened
-on a check, download, or install.
-
-Your appcast and binaries stay on your own infrastructure. Barrel doesn't
-host or verify either.
+Release reporting and update eligibility for macOS applications using Sparkle. Requires macOS 13 or later and Swift 6.
 
 ## Install
 
-Swift Package Manager:
+There is no tagged release yet. Install from source:
 
 ```swift
-.package(url: "https://github.com/barrel-kit/sdk-swift", from: "0.0.1")
+.package(url: "https://github.com/barrelsystems/sdk-swift", branch: "master")
 ```
 
-Requires macOS 13+.
+Add the `BarrelKit` product and configure Sparkle's feed and verification key in
+your application's `Info.plist`.
 
-## Use it
-
-In `applicationDidFinishLaunching(_:)`:
+## Quick start
 
 ```swift
 import BarrelKit
 
-try? BarrelKit.shared.initialize(InitConfig(credential: ProcessInfo.processInfo.environment["BARREL_CREDENTIAL"] ?? ""))
+try BarrelKit.shared.initialize(
+  InitConfig(credential: "your-project-sdk-credential", updates: Updates.Config(autoDownload: false))
+)
+let subscription = BarrelKit.shared.updates.subscribe { status in /* render status */ }
+
+// When status.state is .available:
+try await BarrelKit.shared.updates.download()
+
+// After verified download:
+try await BarrelKit.shared.updates.apply()
+
+subscription.remove()
 ```
 
-Your feed URL is still configured the normal Sparkle way, via `SUFeedURL`
-in your own `Info.plist`. (`InitConfig.updateFeedURL` only exists to
-override that for your own test builds — don't set it in anything you
-ship.)
+## Example data flow
 
-Read state or subscribe to it anywhere else in your app:
+The [app delegate](Examples/BasicSwiftApp/Sources/BasicSwiftApp/BasicSwiftAppApp.swift)
+initializes the native utility. The [SwiftUI view](Examples/BasicSwiftApp/Sources/BasicSwiftApp/ContentView.swift)
+subscribes to `BarrelKit.shared.updates`, displays each status snapshot, and calls
+that same utility from the “Restart to update” button. Automatic download remains
+in the native SDK. Swift needs no IPC bridge;
+the main-actor utility owns the lifecycle and validates every requested action.
 
-```swift
-let policy = BarrelKit.shared.getPolicy() // Policy?
-let state = BarrelKit.shared.getAdapterState() // AdapterState?
-let lastError = BarrelKit.shared.getLastUpdateError() // UpdateFailure?
+## Configuration
 
-BarrelKit.shared.onStateChange { state in /* re-render on every local transition */ }
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `credential` | Required | Project SDK credential. |
+| `baseURL` | Barrel endpoint | Reporting endpoint override for development. |
+| `debug` | `false` | Diagnostic logging. |
+| `updates` | Defaults below | Update-specific configuration. |
 
-BarrelKit.shared.downloadUpdate() // manual trigger, for autoDownload: false
-BarrelKit.shared.applyUpdate() // host-triggered install, ahead of the natural quit-time default
-```
+Fields inside `updates`:
 
-macOS doesn't give a library any way to intercept app termination on its
-own the way Electron's `before-quit` event does, so there's one more hook,
-in `applicationShouldTerminate(_:)`:
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `checkInInterval` | 30 minutes | Nominal cadence in seconds, clamped to 15 minutes–2 hours. |
+| `channel` | `"stable"` | Observed release track. |
+| `attributes` | Empty | String attributes included in reporting. |
+| `autoDownload` | `true` | Download available updates automatically. |
+| `updateFeedURL` | `SUFeedURL` | Override the appcast. |
+| `holdCacheMaxAge` | 24 hours | Cached Hold lifetime in seconds; maximum seven days. |
+
+## Update controls
+
+Status contains `state`, `eligibility`, and `lastError`. Subscriptions receive a
+complete initial snapshot and subsequent snapshots; intermediate transitions may
+coalesce. Keep the returned subscription alive and remove it when no longer used.
+
+Manual download completes after verified download. Manual apply completes at
+installer handoff if the process survives long enough to return; it cannot confirm
+a successful relaunch. Commands report classified errors for an unready SDK,
+invalid state, a concurrent action, Hold, cancellation, or native failure.
+Background reporting remains fail open.
+
+Initialize and call update controls on the main actor. Manual commands throw
+`Updates.ActionError`. Forward the application delegate's termination decision:
 
 ```swift
 func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-  BarrelKit.shared.applicationShouldTerminate() ? .terminateNow : .terminateLater
+  BarrelKit.shared.updates.applicationShouldTerminate() ? .terminateNow : .terminateLater
 }
 ```
 
-`initialize()` only throws for a blank `credential`. Past that it fails
-open — a bad signature or an unreachable backend never gets in the way of
-a real update.
-
 ## Behavior
 
-Checks in on launch and then every 30 minutes (15-minute floor), jittered
-per install. Policy signatures are verified with Apple's own `CryptoKit`,
-nothing third-party. Facts recorded offline get buffered to disk, with
-repeats merged rather than duplicated and the oldest non-terminal entry
-evicted first if the buffer fills. A fresh pre-action check runs
-immediately before every download and apply, separately from the
-30-minute cadence, so a Hold placed since the last check-in still has time
-to land.
+- Reporting, verification failures, and unavailable storage fail open. A previously
+  verified Hold remains effective within its configured cache lifetime.
+- Downloads run automatically by default. A fresh verified Hold can defer a
+  download or installation; it never prevents an ordinary application quit.
+- Your application owns its release feed and artifacts. The native updater
+  verifies artifacts and installs them; Barrel verifies eligibility decisions.
+- Reports version, operating system, architecture, update state/errors, channel,
+  configured attributes, and a locally generated installation identifier.
+- `channel` is an observed, case-sensitive release track; it does not select a feed.
+  Attributes are limited to 20 keys and 256 UTF-8 bytes per value.
+- Debug logging is disabled by default. Reporting is best effort.
 
-Every check-in reports the channel key in `InitConfig.channel` verbatim
-(default: `"stable"`), without changing the updater's feed. Keys are
-case-sensitive; use the configured key rather than its display name.
+## Examples and support
 
-The SDK implements `SPUUserDriver` itself rather than sitting on the side
-as a passive `SPUUpdaterDelegate` observer, which is what lets it see every
-byte-level progress and checking signal instead of losing some of them.
-`AdapterState` reports the real lifecycle
-(`idle`/`checking`/`available`/`downloading`/`downloaded`/`updateCancelled`/`failed`),
-with failures classified into the same `failureMode` taxonomy every Barrel
-SDK shares — `getLastUpdateError()` to read it, `onStateChange()` to
-subscribe. Release notes come through on `AdapterState.available` whenever
-Sparkle's own appcast has any.
-
-A few smaller things: the SDK supports server-directed rotation of the
-trusted key it ships with, keeps one random installation ID on disk, and
-clamps whatever custom attributes you attach so they can't balloon a
-check-in past what Barrel will accept. Debug logging goes through `print`
-and is off unless you ask for it with `InitConfig(debug: true)`. An
-unexpected bug in this SDK's own adapter code is tallied locally by cause,
-never captured or sent anywhere, so one can never crash your app.
-
-## What stays yours
-
-Targeting and rollout percentages live on Barrel's dashboard.
-Your appcast and the binaries it points at are entirely yours, configured
-the normal Sparkle way via `SUFeedURL`.
-
-## Dependencies
-
-One: `Sparkle` itself, the thing being wrapped. Everything else —
-`CryptoKit`, `Foundation`, `AppKit` — is a system framework. This ships
-inside your app, so we keep the dependency list as short as we can.
-
-Source ownership is described in [Architecture](docs/architecture.md).
+- [Swift example](Examples/BasicSwiftApp)
+- [Report a problem](https://github.com/barrelsystems/sdk-swift/issues)

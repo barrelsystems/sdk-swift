@@ -4,7 +4,7 @@ State a rule here only if it's short and always relevant. Push anything longer
 or conditional to a pointed-to doc. This repo is published publicly — never
 add a reference here (or anywhere else in this repo) to internal tooling,
 ticket IDs, team names, or a non-public sibling repo's name/path
-(`infrastructure`, the Home Repo). The other public repos in this SDK family
+(including private workspace paths). The other public repos in this SDK family
 (sdk-electron/sdk-tauri/sdk-swift/sdk-conformance-harness) may be referenced
 where structurally necessary — a dependency, a CI job driving the
 conformance harness.
@@ -21,17 +21,20 @@ concept the way npm does.
 
 ## Error handling
 
-Every I/O path (installation-ID persistence, check-in requests, Policy
-signature verification) fails open: keep the prior state, never throw, never
-retry in a loop. A thrown error is reserved for synchronous, caller-fixable
-misconfiguration (e.g. a blank credential passed to `initialize()`). No force
-unwrap (`!`) or force-try (`try!`) outside the declared-but-deferred-init
-pattern `SparkleUpdaterAdapter.updater` already uses; prefer `guard let`/`if
-let` elsewhere.
+Background reporting, verification, and persistence fail open: retain prior
+state and avoid retry loops. Initialization rejects caller-fixable configuration.
+Explicit update commands return classified action errors for denial or failure. No force
+unwrap or force-try outside the adapter’s declared deferred-init property.
 
 ## Testing framework
 
 Swift Testing (`@Suite`/`@Test`), not XCTest.
+
+## SDK parity
+
+Align product namespaces, public behavior, and concern ownership across SDK ports.
+Language conventions and documented native capabilities may differ. When fixing a
+protocol or lifecycle bug, check the other ports for the same defect.
 
 ## Commit policy
 
@@ -49,7 +52,7 @@ each explanation self-contained. A comment is at most 3 lines.
 
 ## Function style
 
-Free functions for standalone/pure logic (e.g. `verifyAndParsePolicy`),
+Free functions for standalone/pure logic (e.g. `verifyAndParseUpdateEligibility`),
 methods for anything that reads `self`. Mark a type `@MainActor` only when it
 genuinely touches UI-adjacent, main-thread-only APIs (e.g. `SPUUpdater`).
 

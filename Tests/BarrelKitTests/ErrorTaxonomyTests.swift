@@ -4,14 +4,16 @@ import Testing
 
 @Suite struct ErrorTaxonomyTests {
   @Test(arguments: [
-    UpdateFailureMode.manifestUnreachable, .manifestParseFailed, .versionInvalid, .signatureMissing,
+    Updates.FailureMode.manifestUnreachable, .manifestParseFailed, .versionInvalid,
+    .signatureMissing,
     .signatureInvalid, .signatureVersionMismatch, .downloadTransportFailed,
     .extractionFailed, .tempStorageConstraint, .installWriteFailed,
-    .installAuthRequiredOrFailed, .installDowngradeBlocked, .installRelaunchFailed, .installMissingUpdate,
+    .installAuthRequiredOrFailed, .installDowngradeBlocked, .installRelaunchFailed,
+    .installMissingUpdate,
     .configInvalid, .platformUnsupported, .translocationBlocked,
     .webkitTerminated, .releaseNotesFailed, .resumeAppcastFailed, .unknown,
   ])
-  func resolvesANonEmptyTitleForEveryMode(_ mode: UpdateFailureMode) {
+  func resolvesANonEmptyTitleForEveryMode(_ mode: Updates.FailureMode) {
     #expect(!resolveFailureTitle(mode).isEmpty)
   }
 

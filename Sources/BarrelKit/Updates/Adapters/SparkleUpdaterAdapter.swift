@@ -11,11 +11,17 @@ final class SparkleUpdaterAdapter: NSObject {
   private let checkForUpdatesOverride: (() -> Void)?
   private let bufferedFactsStore: BufferedFactsStore
 
-  private var state: AdapterState = .idle
-  private var lastError: UpdateFailure?
+  private var state: Updates.State = .idle
+  // Local checking activity must never replace the last installation state
+  // reported in check-ins or buffered facts.
+  private var reportableState: Updates.State = .idle
+  private var reportableRevision: UInt64 = 0
+  private var lastError: Updates.Failure?
   private var reportedDriverError: NSError?
   private var targetVersion: String?
-  private var onStateChangeListeners: [(AdapterState) -> Void] = []
+  private var onStateChangeListeners: [(Updates.State) -> Void] = []
+  private var onReportableStateChangeListeners: [(Updates.State) -> Void] = []
+  private var onUpdateErrorListeners: [(Updates.Failure) -> Void] = []
 
   // Stored replies: full-wrap means the host's own pre-action-check gates
   // *when* these fire, not Sparkle's own automatic timing.
@@ -26,20 +32,22 @@ final class SparkleUpdaterAdapter: NSObject {
   private var expectedContentLength: UInt64 = 0
   private var receivedContentLength: UInt64 = 0
 
-  init(hostBundle: Bundle, bufferedFactsStore: BufferedFactsStore, checkForUpdates: (() -> Void)? = nil) {
+  init(
+    hostBundle: Bundle, bufferedFactsStore: BufferedFactsStore, checkForUpdates: (() -> Void)? = nil
+  ) {
     self.checkForUpdatesOverride = checkForUpdates
     self.bufferedFactsStore = bufferedFactsStore
     super.init()
-    updater = SPUUpdater(hostBundle: hostBundle, applicationBundle: hostBundle, userDriver: self, delegate: self)
+    updater = SPUUpdater(
+      hostBundle: hostBundle, applicationBundle: hostBundle, userDriver: self, delegate: self)
     try? updater.start()
-    Task { await hydrateLastErrorFromBufferedFacts() }
   }
 
   func setFeedURL(_ url: String) {
     feedURLOverride = url
   }
 
-  private func setState(_ newState: AdapterState) {
+  private func setState(_ newState: Updates.State) {
     // Every cycle-ending state leaves no update still pending apply, so
     // a stale target version can never carry into an unrelated later one.
     switch newState {
@@ -49,13 +57,24 @@ final class SparkleUpdaterAdapter: NSObject {
       break
     }
     state = newState
-    Task { await bufferedFactsStore.recordAdapterState(newState) }
+    if case .checking = newState {
+      // Local activity only -- never buffered, never reportable.
+    } else {
+      reportableState = newState
+      reportableRevision += 1
+      Task { await bufferedFactsStore.recordUpdateState(newState) }
+      for listener in onReportableStateChangeListeners { listener(newState) }
+    }
     for listener in onStateChangeListeners { listener(newState) }
   }
 
   func checkForUpdates() {
-    if let checkForUpdatesOverride { checkForUpdatesOverride() }
-    else { updater.checkForUpdates() }
+    switch state {
+    case .idle, .failed, .updateCancelled: break
+    default: return
+    }
+
+    if let checkForUpdatesOverride { checkForUpdatesOverride() } else { updater.checkForUpdates() }
   }
 
   /// Records an internal defect and no-ops if nothing is `available` yet
@@ -70,6 +89,12 @@ final class SparkleUpdaterAdapter: NSObject {
     pendingUpdateReply = nil
   }
 
+  /// The caller must await the applying sync before `quitAndInstall()`
+  /// can trigger process teardown.
+  func markApplying() {
+    setState(.applying)
+  }
+
   /// Records an internal defect and no-ops if nothing has `downloaded`
   /// yet -- the host is expected to gate this itself, so reaching here
   /// means the host's own pre-action check was bypassed.
@@ -82,31 +107,48 @@ final class SparkleUpdaterAdapter: NSObject {
     pendingInstallReply = nil
   }
 
-  func getAdapterState() -> AdapterState { state }
-  func getLastUpdateError() -> UpdateFailure? { lastError }
+  func getUpdateState() -> Updates.State { state }
+  /// What a check-in actually reports -- excludes `.checking`. Use this,
+  /// never `getUpdateState()`, anywhere the result crosses the wire.
+  func getReportableUpdateState() -> Updates.State { reportableState }
+  func getReportableStateRevision() -> UInt64 { reportableRevision }
+  func getLastUpdateError() -> Updates.Failure? { lastError }
   /// The version currently available/downloaded, if any -- `nil` before
   /// `showUpdateFound` has ever fired.
   func getTargetVersion() -> String? { targetVersion }
 
   /// Host-control registers its own listener here; `BarrelKit.onStateChange`
   /// registers the host app's, so this must support more than one.
-  func onStateChange(_ listener: @escaping (AdapterState) -> Void) {
+  func onStateChange(_ listener: @escaping (Updates.State) -> Void) {
     onStateChangeListeners.append(listener)
+  }
+
+  /// Excludes local `.checking` activity from the state-sync listener.
+  func onReportableStateChange(_ listener: @escaping (Updates.State) -> Void) {
+    onReportableStateChangeListeners.append(listener)
+  }
+
+  /// Fires exactly once per newly-recorded failure, from `applyFailure`'s
+  /// single shared tail end -- never replayed on a later `onStateChange`
+  /// call that happens to still observe `.failed`.
+  func onUpdateError(_ listener: @escaping (Updates.Failure) -> Void) {
+    onUpdateErrorListeners.append(listener)
   }
 
   /// Fills `lastError` from the most recent buffered `updateError` fact on a
   /// fresh process start, before a check-in has run -- otherwise a crash
   /// right after a failure would make `getLastUpdateError()` look clean.
-  private func hydrateLastErrorFromBufferedFacts() async {
+  func hydrateLastErrorFromBufferedFacts() async {
     guard lastError == nil else { return }
-    let mostRecent = await bufferedFactsStore.snapshot().compactMap { fact -> (UpdateFailure, String)? in
+    let mostRecent = await bufferedFactsStore.snapshot().compactMap {
+      fact -> (Updates.Failure, String)? in
       guard case .updateError(let failure, _, let lastObservedAt, _, _) = fact else { return nil }
       return (failure, lastObservedAt)
     }.max { $0.1 < $1.1 }?.0
     guard let mostRecent else { return }
     // Recompute `title`, same as `buildFailureState` does, rather than
     // trusting whatever the buffered fact happened to carry.
-    lastError = UpdateFailure(
+    lastError = Updates.Failure(
       phase: mostRecent.phase, failureMode: mostRecent.failureMode,
       title: resolveFailureTitle(mostRecent.failureMode), platform: mostRecent.platform,
       platformCode: mostRecent.platformCode)
@@ -150,12 +192,16 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
     with appcastItem: SUAppcastItem, state updateState: SPUUserUpdateState,
     reply: @escaping (SPUUserUpdateChoice) -> Void
   ) {
-    handleUpdateFound(version: appcastItem.displayVersionString, releaseNotes: appcastItem.itemDescription, reply: reply)
+    handleUpdateFound(
+      version: appcastItem.displayVersionString, releaseNotes: appcastItem.itemDescription,
+      reply: reply)
   }
 
   // The native update-state argument cannot be constructed outside Sparkle.
   // Keep its event's normalized values separate from that opaque argument.
-  func handleUpdateFound(version: String, releaseNotes: String?, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+  func handleUpdateFound(
+    version: String, releaseNotes: String?, reply: @escaping (SPUUserUpdateChoice) -> Void
+  ) {
     pendingUpdateReply = reply
     targetVersion = version
     setState(.available(releaseNotes: releaseNotes))
@@ -174,8 +220,10 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
     reportedDriverError = error as NSError
     if let rawReason = (error as NSError).userInfo[SPUNoUpdateFoundReasonKey] as? Int,
       let reason = SPUNoUpdateFoundReason(rawValue: OSStatus(rawReason)),
-      let (phase, failureMode) = mapSparkleNoUpdateFoundReason(reason) {
-      applyFailure(phase: phase, failureMode: failureMode, platformCode: noUpdateFoundReasonCaseName(reason))
+      let (phase, failureMode) = mapSparkleNoUpdateFoundReason(reason)
+    {
+      applyFailure(
+        phase: phase, failureMode: failureMode, platformCode: noUpdateFoundReasonCaseName(reason))
       acknowledgement()
       return
     }
@@ -207,7 +255,7 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
 
   func showDownloadDidStartExtractingUpdate() {}
 
-  /// Extraction has no separate `AdapterState` bucket -- state stays
+  /// Extraction has no separate `Updates.State` bucket -- state stays
   /// `.downloading` with whatever progress download already left in
   /// place; this callback's own `progress` argument is never used.
   func showExtractionReceivedProgress(_ progress: Double) {}
@@ -218,7 +266,8 @@ extension SparkleUpdaterAdapter: SPUUserDriver {
   }
 
   func showInstallingUpdate(
-    withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void
+    withApplicationTerminated applicationTerminated: Bool,
+    retryTerminatingApplication: @escaping () -> Void
   ) {}
 
   func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
@@ -245,7 +294,8 @@ extension SparkleUpdaterAdapter {
       setState(.downloading(progress: nil))
       return
     }
-    let progress = Int((Double(receivedContentLength) / Double(expectedContentLength) * 100).rounded())
+    let progress = Int(
+      (Double(receivedContentLength) / Double(expectedContentLength) * 100).rounded())
     setState(.downloading(progress: min(progress, 100)))
   }
 
@@ -269,11 +319,14 @@ extension SparkleUpdaterAdapter {
   /// Shared tail end of classifying any Sparkle failure, regardless of
   /// which callback surfaced it -- builds the failure, buffers it, and
   /// transitions `state`.
-  fileprivate func applyFailure(phase: Phase, failureMode: UpdateFailureMode, platformCode: String) {
+  fileprivate func applyFailure(
+    phase: Updates.Phase, failureMode: Updates.FailureMode, platformCode: String
+  ) {
     let (failure, failedState) = buildFailureState(
       platform: "sparkle", failureMode: failureMode, phase: phase, platformCode: platformCode)
     lastError = failure
     Task { await bufferedFactsStore.recordUpdateError(failure) }
     setState(failedState)
+    for listener in onUpdateErrorListeners { listener(failure) }
   }
 }

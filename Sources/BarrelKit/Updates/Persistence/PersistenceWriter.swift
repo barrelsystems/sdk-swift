@@ -8,6 +8,8 @@ enum PersistenceWriter {
   nonisolated(unsafe) private static var lastSnapshots: [String: Data] = [:]
   nonisolated(unsafe) private static var exitHandlerRegistered = false
   nonisolated(unsafe) private static var exiting = false
+  nonisolated(unsafe) private static var pending: Set<String> = []
+  nonisolated(unsafe) private static var workerScheduled = false
   private static let lock = NSLock()
   #if DEBUG
     nonisolated(unsafe) private static var beforeQueuedWrite: (@Sendable (String) -> Void)?
@@ -25,7 +27,29 @@ enum PersistenceWriter {
       registerExitFallbackIfNeeded()
       guard !exiting else { return }
 
-      writes.async {
+      pending.insert(path)
+      guard !workerScheduled else { return }
+
+      workerScheduled = true
+      writes.async { drain() }
+    }
+  }
+
+  private static func drain() {
+    while true {
+      let jobs: [String: Data] = lock.withLock {
+        guard !pending.isEmpty else {
+          workerScheduled = false
+          return [:]
+        }
+
+        let jobs = lastSnapshots.filter { pending.contains($0.key) }
+        pending.removeAll()
+        return jobs
+      }
+      guard !jobs.isEmpty else { return }
+
+      for (path, data) in jobs {
         #if DEBUG
           let observer = lock.withLock { beforeQueuedWrite }
           observer?(path)
