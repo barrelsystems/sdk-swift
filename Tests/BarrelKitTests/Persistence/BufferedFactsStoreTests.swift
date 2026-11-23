@@ -4,28 +4,29 @@ import Testing
 @testable import BarrelKit
 
 @Suite struct BufferedFactsStoreTests {
-  @Test func mergesARepeatedAdapterStateInsteadOfAppending() async {
+  @Test func mergesARepeatedUpdateStateInsteadOfAppending() async {
     let store = BufferedFactsStore()
-    await store.recordAdapterState(.checking)
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
+    await store.recordUpdateState(.checking)
     let snapshot = await store.snapshot()
     #expect(snapshot.count == 1)
     #expect(snapshot[0].occurrenceCount == 2)
   }
 
-  @Test func distinctAdapterStatesEachGetTheirOwnEntry() async {
+  @Test func distinctUpdateStatesEachGetTheirOwnEntry() async {
     let store = BufferedFactsStore()
-    await store.recordAdapterState(.checking)
-    await store.recordAdapterState(.available(releaseNotes: nil))
+    await store.recordUpdateState(.checking)
+    await store.recordUpdateState(.available(releaseNotes: nil))
     let snapshot = await store.snapshot()
     #expect(snapshot.count == 2)
   }
 
   @Test func clearOnlyRemovesExactlyTheSentSnapshot() async {
     let store = BufferedFactsStore()
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
     let sent = await store.snapshot()
-    await store.recordAdapterState(.available(releaseNotes: nil))  // recorded after the snapshot was taken
+    // recorded after the snapshot was taken
+    await store.recordUpdateState(.available(releaseNotes: nil))
     await store.clear(sent: sent)
 
     let remaining = await store.snapshot()
@@ -35,10 +36,10 @@ import Testing
 
   @Test func acknowledgmentPreservesAnUnsentEqualValuedObservation() async throws {
     let store = BufferedFactsStore(now: { "2026-01-01T00:00:00Z" })
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
     let sent = await store.snapshot()
-    await store.recordAdapterState(.downloaded)
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.downloaded)
+    await store.recordUpdateState(.checking)
     let before = await store.snapshot()
     let encoder = JSONEncoder()
     encoder.outputFormatting = .sortedKeys
@@ -55,12 +56,12 @@ import Testing
 
   @Test func acknowledgmentCannotClearAnEqualReplacementAfterEviction() async {
     let store = BufferedFactsStore(now: { "2026-01-01T00:00:00Z" })
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
     let sent = await store.snapshot()
     for progress in 0..<32 {
-      await store.recordAdapterState(.downloading(progress: progress))
+      await store.recordUpdateState(.downloading(progress: progress))
     }
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
     let before = await store.snapshot()
 
     await store.clear(sent: sent)
@@ -72,18 +73,40 @@ import Testing
     // Fill the buffer with 32 distinct terminal ("failed") facts -- each
     // discriminated by a unique platformCode, so none merge.
     for i in 0..<32 {
-      await store.recordAdapterState(
+      await store.recordUpdateState(
         .failed(category: .updater, code: .unknown, platformCode: "code-\(i)"))
     }
     #expect(await store.snapshot().count == 32)
 
     // An incoming intermediate ("checking") fact must be dropped, not evict a terminal one.
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
     let snapshot = await store.snapshot()
     #expect(snapshot.count == 32)
     #expect(
       !snapshot.contains {
-        if case .adapterState(.checking, _, _, _, _) = $0 { return true }
+        if case .lifecycleState(.checking, _, _, _, _) = $0 { return true }
+        return false
+      })
+  }
+
+  // `.applying` is terminal-priority, same as `.downloaded`/`.failed`/
+  // `.update-cancelled` -- it may be the last fact ever recorded if the
+  // host process doesn't come back, so a full buffer must protect it too.
+  @Test func applyingIsNeverDisplacedByAnIntermediateFact() async {
+    let store = BufferedFactsStore()
+    await store.recordUpdateState(.applying)
+    for i in 0..<31 {
+      await store.recordUpdateState(
+        .failed(category: .updater, code: .unknown, platformCode: "code-\(i)"))
+    }
+    #expect(await store.snapshot().count == 32)
+
+    await store.recordUpdateState(.checking)
+    let snapshot = await store.snapshot()
+    #expect(snapshot.count == 32)
+    #expect(
+      snapshot.contains {
+        if case .lifecycleState(.applying, _, _, _, _) = $0 { return true }
         return false
       })
   }
@@ -92,7 +115,7 @@ import Testing
     let path = NSTemporaryDirectory() + "barrel-test-\(UUID().uuidString)/facts.json"
     defer { try? FileManager.default.removeItem(atPath: path) }
 
-    let failure = UpdateFailure(
+    let failure = Updates.Failure(
       phase: .download, failureMode: .downloadTransportFailed,
       title: "The update download failed at the network layer.",
       platform: "sparkle", platformCode: "test-code")
@@ -121,24 +144,24 @@ import Testing
 
   @Test func anIntermediateFactIsEvictedToMakeRoomForAnotherIntermediateFact() async {
     let store = BufferedFactsStore()
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
     for i in 1..<32 {
-      await store.recordAdapterState(
+      await store.recordUpdateState(
         .failed(category: .updater, code: .unknown, platformCode: "code-\(i)"))
     }
     #expect(await store.snapshot().count == 32)
 
-    await store.recordAdapterState(.available(releaseNotes: nil))
+    await store.recordUpdateState(.available(releaseNotes: nil))
     let snapshot = await store.snapshot()
     #expect(snapshot.count == 32)
     #expect(
       !snapshot.contains {
-        if case .adapterState(.checking, _, _, _, _) = $0 { return true }
+        if case .lifecycleState(.checking, _, _, _, _) = $0 { return true }
         return false
       })
     #expect(
       snapshot.contains {
-        if case .adapterState(.available(releaseNotes: nil), _, _, _, _) = $0 { return true }
+        if case .lifecycleState(.available(releaseNotes: nil), _, _, _, _) = $0 { return true }
         return false
       })
   }

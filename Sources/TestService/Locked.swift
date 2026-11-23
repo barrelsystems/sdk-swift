@@ -1,7 +1,6 @@
 import Foundation
 
-/// A plain mutex-guarded box -- the one shape `AppcastServer` and
-/// `AdapterRegistry` both needed independently.
+/// Protects values shared by HTTP handler threads and the main actor.
 final class Locked<Value>: @unchecked Sendable {
   private var value: Value
   private let lock = NSLock()

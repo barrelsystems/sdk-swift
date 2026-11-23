@@ -15,7 +15,9 @@ struct PostProtocolRequestParams<Body: Encodable> {
 /// Shared shape behind both `sendCheckIn` and `checkPreAction`: POST a signed
 /// body, reject a non-2xx or unrecognized `protocolVersion`, decode the
 /// common `CheckInResponse` envelope. Any failure fails open, returning `nil`.
-func postProtocolRequest<Body: Encodable>(_ params: PostProtocolRequestParams<Body>) async -> CheckInResponse? {
+func postProtocolRequest<Body: Encodable>(_ params: PostProtocolRequestParams<Body>) async
+  -> CheckInResponse?
+{
   guard let url = URL(string: "\(params.baseURL)/\(params.path)") else { return nil }
   var request = URLRequest(url: url, timeoutInterval: requestTimeout)
   request.httpMethod = "POST"
@@ -32,7 +34,8 @@ func postProtocolRequest<Body: Encodable>(_ params: PostProtocolRequestParams<Bo
 
     let parsed = try JSONDecoder().decode(CheckInResponse.self, from: data)
     guard parsed.protocolVersion == protocolVersion else {
-      params.log?("\(params.label): rejected unrecognized protocolVersion \(parsed.protocolVersion)")
+      params.log?(
+        "\(params.label): rejected unrecognized protocolVersion \(parsed.protocolVersion)")
       return nil
     }
 

@@ -22,7 +22,6 @@ struct CreateAdapterRequest: Decodable {
   let channel: String?
   let checkInBaseUrl: String
   let publicKeyPem: String
-  let variant: String?
 }
 
 struct JitterFractionRequest: Decodable {
@@ -42,6 +41,6 @@ struct ResultWrapper<T: Encodable>: Encodable {
 
 struct FactObservation: Codable, Sendable {
   let kind: String
-  let state: AdapterState?
+  let state: Updates.State?
   let platformCode: String?
 }

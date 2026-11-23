@@ -10,7 +10,9 @@ final class AdapterInstance {
   let debugMessages = Locked<[String]>([])
 
   var adapter: SparkleUpdaterAdapter {
-    guard let adapter = runtime.adapter else { preconditionFailure("SDK has not initialized") }
+    guard let adapter = runtime.updates.adapter else {
+      preconditionFailure("SDK has not initialized")
+    }
     return adapter
   }
 
@@ -50,12 +52,14 @@ final class AdapterInstance {
     do {
       try runtime.initialize(
         InitConfig(
-          credential: "test-service", baseURL: request.checkInBaseUrl,
-          checkInInterval: request.checkInIntervalMs.map { $0 / 1000 },
-          attributes: request.attributes ?? [:], channel: request.channel ?? "stable",
-          autoDownload: false,
-          debug: request.debug ?? false
-        ))
+          credential: "test-service",
+          baseURL: request.checkInBaseUrl,
+          debug: request.debug ?? false,
+          updates: Updates.Config(
+            checkInInterval: request.checkInIntervalMs.map { $0 / 1000 },
+            attributes: request.attributes ?? [:],
+            channel: request.channel ?? "stable",
+            autoDownload: false)))
     } catch { preconditionFailure("Invalid test runtime config: \(error)") }
   }
 }
@@ -69,7 +73,7 @@ final class AdapterRegistry: @unchecked Sendable {
       AdapterInstance(request: request)
     }
 
-    runBlocking(fallback: ()) { await instance.runtime.ready() }
+    runBlocking(fallback: ()) { await instance.runtime.updates.ready() }
     adapters.write { $0[id] = instance }
     return id
   }
@@ -82,7 +86,7 @@ final class AdapterRegistry: @unchecked Sendable {
     if let instance = adapters.read({ $0[id] }) {
       let directory = runOnMain { instance.dataDirectory }
       runBlocking(fallback: ()) {
-        await instance.runtime.stopCadence()
+        await instance.runtime.updates.stopCadence()
         await PersistenceWriter.waitForPendingWrites()
       }
       try? FileManager.default.removeItem(at: directory)

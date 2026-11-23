@@ -86,7 +86,9 @@ import Testing
   }
 
   @Test func mapsUnreachableNoUpdateFoundReasonsToPlatformUnsupported() {
-    for reason: SPUNoUpdateFoundReason in [.systemIsTooOld, .systemIsTooNew, .hardwareDoesNotSupportARM64] {
+    for reason: SPUNoUpdateFoundReason in [
+      .systemIsTooOld, .systemIsTooNew, .hardwareDoesNotSupportARM64,
+    ] {
       let mapped = mapSparkleNoUpdateFoundReason(reason)
       #expect(mapped?.phase == .config)
       #expect(mapped?.failureMode == .platformUnsupported)

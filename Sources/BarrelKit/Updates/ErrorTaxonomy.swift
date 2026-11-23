@@ -1,4 +1,4 @@
-private let failureModeTitles: [UpdateFailureMode: String] = [
+private let failureModeTitles: [Updates.FailureMode: String] = [
   .manifestUnreachable: "Could not reach the update manifest.",
   .manifestParseFailed: "The update manifest could not be parsed.",
   .versionInvalid: "The update manifest's version is invalid.",
@@ -24,12 +24,12 @@ private let failureModeTitles: [UpdateFailureMode: String] = [
 ]
 
 /// `title` is resolved here, at return/display time -- never persisted or transmitted.
-func resolveFailureTitle(_ failureMode: UpdateFailureMode) -> String {
+func resolveFailureTitle(_ failureMode: Updates.FailureMode) -> String {
   failureModeTitles[failureMode] ?? "An unclassified update failure occurred."
 }
 
 /// Mechanical, fixed derivation -- never a second independent classification.
-func category(forPhase phase: Phase) -> AdapterState.FailureCategory {
+func category(forPhase phase: Updates.Phase) -> Updates.FailureCategory {
   switch phase {
   case .check: return .check
   case .verify, .download, .extract: return .download
@@ -37,13 +37,17 @@ func category(forPhase phase: Phase) -> AdapterState.FailureCategory {
   }
 }
 
-/// Builds the matching `UpdateFailure` and `AdapterState.failed` from one classification.
-func buildFailureState(platform: String, failureMode: UpdateFailureMode, phase: Phase, platformCode: String) -> (
-  failure: UpdateFailure, state: AdapterState
+/// Builds the matching `Updates.Failure` and `Updates.State.failed` from one classification.
+func buildFailureState(
+  platform: String, failureMode: Updates.FailureMode, phase: Updates.Phase, platformCode: String
+) -> (
+  failure: Updates.Failure, state: Updates.State
 ) {
-  let failure = UpdateFailure(
-    phase: phase, failureMode: failureMode, title: resolveFailureTitle(failureMode), platform: platform,
+  let failure = Updates.Failure(
+    phase: phase, failureMode: failureMode, title: resolveFailureTitle(failureMode),
+    platform: platform,
     platformCode: platformCode)
-  let state = AdapterState.failed(category: category(forPhase: phase), code: failureMode, platformCode: platformCode)
+  let state = Updates.State.failed(
+    category: category(forPhase: phase), code: failureMode, platformCode: platformCode)
   return (failure, state)
 }

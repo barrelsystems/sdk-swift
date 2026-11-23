@@ -3,11 +3,11 @@ import Foundation
 @testable import BarrelKit
 
 func recordObservation(_ fact: FactObservation, store: BufferedFactsStore) async {
-  if fact.kind == "adapterState", let state = fact.state {
-    await store.recordAdapterState(state)
+  if fact.kind == "lifecycleState", let state = fact.state {
+    await store.recordUpdateState(state)
   } else if fact.kind == "updateError", let code = fact.platformCode {
     await store.recordUpdateError(
-      UpdateFailure(
+      Updates.Failure(
         phase: .download, failureMode: .unknown,
         title: "Derived display text", platform: "sparkle", platformCode: code))
   }
@@ -54,7 +54,7 @@ func handleBufferCommand(_ command: String, body: [String: Any], instance: Adapt
     }
 
     let concurrent = body["concurrent"] as? Bool ?? false
-    let store = runOnMain { instance.runtime.bufferedFactsStore }
+    let store = runOnMain { instance.runtime.updates.bufferedFactsStore }
 
     runBlocking(fallback: ()) {
       if concurrent {
@@ -67,7 +67,7 @@ func handleBufferCommand(_ command: String, body: [String: Any], instance: Adapt
     }
     return .json(200, ResultWrapper<String?>(result: nil))
   case "getBufferedFacts", "clearBuffer":
-    let store = runOnMain { instance.runtime.bufferedFactsStore }
+    let store = runOnMain { instance.runtime.updates.bufferedFactsStore }
 
     if command == "clearBuffer" {
       runBlocking(fallback: ()) { await store.clear(sent: await store.snapshot()) }

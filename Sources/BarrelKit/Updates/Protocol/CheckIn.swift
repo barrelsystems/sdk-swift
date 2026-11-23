@@ -5,14 +5,15 @@ import Foundation
 /// those are resolved for local display, never meant to cross the wire.
 func toWireBufferedFact(_ fact: BufferedFact) -> WireBufferedFact {
   switch fact {
-  case .adapterState(let state, let first, let last, let count, _):
+  case .lifecycleState(let state, let first, let last, let count, _):
     return WireBufferedFact(
-      kind: "adapterState", firstObservedAt: first, lastObservedAt: last, occurrenceCount: count,
+      kind: "lifecycleState", firstObservedAt: first, lastObservedAt: last, occurrenceCount: count,
       state: state, phase: nil, failureMode: nil, platformCode: nil)
   case .updateError(let failure, let first, let last, let count, _):
     return WireBufferedFact(
       kind: "updateError", firstObservedAt: first, lastObservedAt: last, occurrenceCount: count,
-      state: nil, phase: failure.phase, failureMode: failure.failureMode, platformCode: failure.platformCode)
+      state: nil, phase: failure.phase, failureMode: failure.failureMode,
+      platformCode: failure.platformCode)
   }
 }
 
@@ -21,8 +22,9 @@ struct CheckInParams: Sendable {
   var sdkVersion: String
   var channel: String
   var attributes: [String: String]
-  var adapterState: AdapterState
+  var lifecycleState: Updates.State
   var bufferedFacts: [BufferedFact]
+  var checkInIntervalMs: Int
   var log: (@Sendable (String) -> Void)?
   var session: URLSession = .shared
 }
@@ -44,12 +46,14 @@ func sendCheckIn(_ params: CheckInParams) async -> CheckInResponse? {
     arch: env.arch,
     osVersion: env.osVersion,
     attributes: boundAttributes(params.attributes),
-    adapterState: params.adapterState,
-    bufferedFacts: params.bufferedFacts.map(toWireBufferedFact)
+    lifecycleState: params.lifecycleState,
+    bufferedFacts: params.bufferedFacts.map(toWireBufferedFact),
+    checkInIntervalMs: params.checkInIntervalMs
   )
 
   return await postProtocolRequest(
     PostProtocolRequestParams(
-      baseURL: params.connection.baseURL, path: "check-in", credential: params.connection.credential, body: body,
+      baseURL: params.connection.baseURL, path: "check-in",
+      credential: params.connection.credential, body: body,
       label: "check-in", log: params.log, session: params.session))
 }

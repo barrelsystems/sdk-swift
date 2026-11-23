@@ -19,15 +19,17 @@ func ed25519PublicKey(fromPEM pem: String) -> Curve25519.Signing.PublicKey? {
   return try? Curve25519.Signing.PublicKey(rawRepresentation: der.suffix(32))
 }
 
-/// Verifies the raw `policy` byte string's Ed25519 signature via CryptoKit,
-/// then parses it. Any failure fails open, returning `nil`.
-func verifyAndParsePolicy(_ response: CheckInResponse, publicKeyPEM: String) -> Policy? {
+/// Verifies the raw `updateEligibility` byte string's Ed25519 signature via
+/// CryptoKit, then parses it. Any failure fails open, returning `nil`.
+func verifyAndParseUpdateEligibility(_ response: CheckInResponse, publicKeyPEM: String) -> Updates
+  .Eligibility?
+{
   guard let publicKey = ed25519PublicKey(fromPEM: publicKeyPEM),
-    let policyData = response.policy.data(using: .utf8),
+    let eligibilityData = response.updateEligibility.data(using: .utf8),
     let signatureData = Data(base64Encoded: response.signature)
   else { return nil }
 
-  guard publicKey.isValidSignature(signatureData, for: policyData) else { return nil }
+  guard publicKey.isValidSignature(signatureData, for: eligibilityData) else { return nil }
 
-  return try? JSONDecoder().decode(Policy.self, from: policyData)
+  return try? JSONDecoder().decode(Updates.Eligibility.self, from: eligibilityData)
 }

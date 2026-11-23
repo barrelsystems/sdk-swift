@@ -1,5 +1,5 @@
 /// Tallies a bug in this SDK's own adapter code, by coarse cause, and
-/// swallows it -- never crashes the host or leaks into `UpdateFailure`.
+/// swallows it -- never crashes the host or leaks into `Updates.Failure`.
 /// Counts only, never a message/stack trace -- see README for why.
 @MainActor
 enum InternalDefects {

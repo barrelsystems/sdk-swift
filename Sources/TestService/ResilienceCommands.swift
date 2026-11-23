@@ -8,9 +8,11 @@ func handleResilienceCommand(_ command: String, body: [String: Any], instance: A
 {
   switch command {
   case "getCadenceState":
-    let inFlight = runBlocking(fallback: false) { await instance.runtime.cadenceIsChecking() }
+    let inFlight = runBlocking(fallback: false) {
+      await instance.runtime.updates.cadenceIsChecking()
+    }
     let interval = runBlocking(fallback: Double?.none) {
-      await instance.runtime.cadenceIntervalMs()
+      await instance.runtime.updates.cadenceIntervalMs()
     }
     return .json(
       200,
@@ -37,7 +39,7 @@ func handleResilienceCommand(_ command: String, body: [String: Any], instance: A
     return .json(200, ResultWrapper<String?>(result: nil))
   case "getPersistedInstallationId":
     runBlocking(fallback: ()) {
-      await instance.runtime.installationIdStore.waitForPendingPersistence()
+      await instance.runtime.updates.installationIdStore.waitForPendingPersistence()
     }
     let path = runOnMain {
       instance.dataDirectory.appendingPathComponent("barrel-installation.json")

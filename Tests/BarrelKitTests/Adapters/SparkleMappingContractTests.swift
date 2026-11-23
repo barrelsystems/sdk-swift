@@ -5,7 +5,7 @@ import Testing
 
 @Suite struct SparkleMappingContractTests {
   @Test @MainActor func everyFailureCodeReachesThePublicErrorAndFailedState() {
-    let cases: [(SUError, Phase, UpdateFailureMode, String)] = [
+    let cases: [(SUError, Updates.Phase, Updates.FailureMode, String)] = [
       (.noPublicDSAFoundError, .verify, .signatureMissing, "SUNoPublicDSAFoundError"),
       (.insufficientSigningError, .verify, .signatureMissing, "SUInsufficientSigningError"),
       (.signatureError, .verify, .signatureInvalid, "SUSignatureError"),
@@ -13,7 +13,10 @@ import Testing
       (.insecureFeedURLError, .config, .configInvalid, "SUInsecureFeedURLError"),
       (.invalidFeedURLError, .config, .configInvalid, "SUInvalidFeedURLError"),
       (.invalidUpdaterError, .config, .configInvalid, "SUInvalidUpdaterError"),
-      (.invalidHostBundleIdentifierError, .config, .configInvalid, "SUInvalidHostBundleIdentifierError"),
+      (
+        .invalidHostBundleIdentifierError, .config, .configInvalid,
+        "SUInvalidHostBundleIdentifierError"
+      ),
       (.incorrectAPIUsageError, .config, .configInvalid, "SUIncorrectAPIUsageError"),
       (.runningFromDiskImageError, .config, .configInvalid, "SURunningFromDiskImageError"),
       (.invalidHostVersionError, .config, .platformUnsupported, "SUInvalidHostVersionError"),
@@ -27,9 +30,15 @@ import Testing
       (.downloadError, .download, .downloadTransportFailed, "SUDownloadError"),
       (.unarchivingError, .extract, .extractionFailed, "SUUnarchivingError"),
       (.fileCopyFailure, .install, .installWriteFailed, "SUFileCopyFailure"),
-      (.installationWriteNoPermissionError, .install, .installWriteFailed, "SUInstallationWriteNoPermissionError"),
+      (
+        .installationWriteNoPermissionError, .install, .installWriteFailed,
+        "SUInstallationWriteNoPermissionError"
+      ),
       (.authenticationFailure, .install, .installAuthRequiredOrFailed, "SUAuthenticationFailure"),
-      (.installationAuthorizeLaterError, .install, .installAuthRequiredOrFailed, "SUInstallationAuthorizeLaterError"),
+      (
+        .installationAuthorizeLaterError, .install, .installAuthRequiredOrFailed,
+        "SUInstallationAuthorizeLaterError"
+      ),
       (.missingUpdateError, .install, .installMissingUpdate, "SUMissingUpdateError"),
       (.missingInstallerToolError, .install, .installMissingUpdate, "SUMissingInstallerToolError"),
       (.notValidUpdateError, .install, .installMissingUpdate, "SUNotValidUpdateError"),
@@ -42,7 +51,8 @@ import Testing
     #expect(Set(cases.map { $0.0.rawValue }).count == cases.count)
 
     for (code, phase, mode, platformCode) in cases {
-      let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
+      let adapter = SparkleUpdaterAdapter(
+        hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
       #expect(adapter.getLastUpdateError() == nil)
       var acknowledgements = 0
 
@@ -56,8 +66,10 @@ import Testing
       #expect(failure?.platform == "sparkle")
       #expect(failure?.platformCode == platformCode)
       #expect(failure?.title == resolveFailureTitle(mode))
-      #expect(adapter.getAdapterState() == .failed(
-        category: category(forPhase: phase), code: mode, platformCode: platformCode))
+      #expect(
+        adapter.getUpdateState()
+          == .failed(
+            category: category(forPhase: phase), code: mode, platformCode: platformCode))
       #expect(acknowledgements == 1)
 
       adapter.showUserInitiatedUpdateCheck(cancellation: {})
@@ -67,20 +79,21 @@ import Testing
 
   @Test @MainActor func cancellationAndNoUpdateAreNotFailures() {
     let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
-    for (code, expected): (SUError, AdapterState) in [
+    for (code, expected): (SUError, Updates.State) in [
       (.installationCanceledError, .updateCancelled), (.noUpdateError, .idle),
     ] {
       adapter.showUpdaterError(
         NSError(domain: "SUSparkleErrorDomain", code: Int(code.rawValue)), acknowledgement: {})
 
-      #expect(adapter.getAdapterState() == expected)
+      #expect(adapter.getUpdateState() == expected)
       #expect(adapter.getLastUpdateError() == nil)
     }
   }
 
   @Test @MainActor func unknownErrorsRetainTheRawCodeAndPlatform() {
     let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
-    adapter.showUpdaterError(NSError(domain: "SUSparkleErrorDomain", code: 999_999), acknowledgement: {})
+    adapter.showUpdaterError(
+      NSError(domain: "SUSparkleErrorDomain", code: 999_999), acknowledgement: {})
 
     let failure = adapter.getLastUpdateError()
     #expect(failure?.failureMode == .unknown)
@@ -91,25 +104,33 @@ import Testing
 
   @Test @MainActor func delegateOnlyAbortReportsCancellationAndFailure() {
     let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
-    let updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: adapter, delegate: adapter)
-    adapter.updater(updater, didAbortWithError: NSError(
-      domain: "SUSparkleErrorDomain", code: Int(SUError.installationCanceledError.rawValue)))
-    #expect(adapter.getAdapterState() == .updateCancelled)
+    let updater = SPUUpdater(
+      hostBundle: .main, applicationBundle: .main, userDriver: adapter, delegate: adapter)
+    adapter.updater(
+      updater,
+      didAbortWithError: NSError(
+        domain: "SUSparkleErrorDomain", code: Int(SUError.installationCanceledError.rawValue)))
+    #expect(adapter.getUpdateState() == .updateCancelled)
     #expect(adapter.getLastUpdateError() == nil)
 
-    adapter.updater(updater, didAbortWithError: NSError(
-      domain: "SUSparkleErrorDomain", code: Int(SUError.downloadError.rawValue)))
+    adapter.updater(
+      updater,
+      didAbortWithError: NSError(
+        domain: "SUSparkleErrorDomain", code: Int(SUError.downloadError.rawValue)))
     #expect(adapter.getLastUpdateError()?.failureMode == .downloadTransportFailed)
-    #expect(adapter.getAdapterState() == .failed(
-      category: .download, code: .downloadTransportFailed, platformCode: "SUDownloadError"))
+    #expect(
+      adapter.getUpdateState()
+        == .failed(
+          category: .download, code: .downloadTransportFailed, platformCode: "SUDownloadError"))
   }
 
   @Test @MainActor func driverAndDelegateCallbacksCountOneFailureOnce() async {
     let store = BufferedFactsStore()
     let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: store)
-    let updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: adapter, delegate: adapter)
+    let updater = SPUUpdater(
+      hostBundle: .main, applicationBundle: .main, userDriver: adapter, delegate: adapter)
     let error = NSError(domain: "SUSparkleErrorDomain", code: Int(SUError.downloadError.rawValue))
-    var states: [AdapterState] = []
+    var states: [Updates.State] = []
     adapter.onStateChange { states.append($0) }
 
     adapter.showUpdaterError(error, acknowledgement: {})
@@ -134,34 +155,34 @@ import Testing
   @Test @MainActor func lifecycleCallbacksPreserveDownloadProgressDuringExtraction() {
     let adapter = SparkleUpdaterAdapter(hostBundle: .main, bufferedFactsStore: BufferedFactsStore())
     adapter.showUserInitiatedUpdateCheck(cancellation: {})
-    #expect(adapter.getAdapterState() == .checking)
+    #expect(adapter.getUpdateState() == .checking)
 
     adapter.handleUpdateFound(version: "2.0.0", releaseNotes: "Changes", reply: { _ in })
-    #expect(adapter.getAdapterState() == .available(releaseNotes: "Changes"))
+    #expect(adapter.getUpdateState() == .available(releaseNotes: "Changes"))
     #expect(adapter.getTargetVersion() == "2.0.0")
 
     adapter.showDownloadInitiated(cancellation: {})
-    #expect(adapter.getAdapterState() == .downloading(progress: nil))
+    #expect(adapter.getUpdateState() == .downloading(progress: nil))
     adapter.showDownloadDidReceiveData(ofLength: 20)
-    #expect(adapter.getAdapterState() == .downloading(progress: nil))
+    #expect(adapter.getUpdateState() == .downloading(progress: nil))
 
     adapter.showDownloadDidReceiveExpectedContentLength(200)
     adapter.showDownloadDidReceiveData(ofLength: 40)
     adapter.showDownloadDidReceiveData(ofLength: 61)
-    #expect(adapter.getAdapterState() == .downloading(progress: 51))
+    #expect(adapter.getUpdateState() == .downloading(progress: 51))
 
     adapter.showDownloadDidStartExtractingUpdate()
     adapter.showExtractionReceivedProgress(0.99)
-    #expect(adapter.getAdapterState() == .downloading(progress: 51))
+    #expect(adapter.getUpdateState() == .downloading(progress: 51))
 
     adapter.showDownloadDidReceiveData(ofLength: 200)
-    #expect(adapter.getAdapterState() == .downloading(progress: 100))
+    #expect(adapter.getUpdateState() == .downloading(progress: 100))
     adapter.showReady(toInstallAndRelaunch: { _ in })
-    #expect(adapter.getAdapterState() == .downloaded)
+    #expect(adapter.getUpdateState() == .downloaded)
     #expect(adapter.getLastUpdateError() == nil)
 
     adapter.showDownloadInitiated(cancellation: {})
     adapter.showDownloadDidReceiveData(ofLength: 1)
-    #expect(adapter.getAdapterState() == .downloading(progress: nil))
+    #expect(adapter.getUpdateState() == .downloading(progress: nil))
   }
 }

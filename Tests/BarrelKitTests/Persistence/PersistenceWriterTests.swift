@@ -55,7 +55,7 @@ private actor WriteProbe {
       readerGate.signal()
     }
 
-    await store.recordAdapterState(.checking)
+    await store.recordUpdateState(.checking)
     let snapshot = await store.snapshot()
     let timedOut = await probe.timedOut
     readerGate.signal()
@@ -66,5 +66,55 @@ private actor WriteProbe {
     #expect(!timedOut, "Reading the in-memory buffer must not wait for disk I/O")
     #expect(snapshot.count == 1)
     #expect(persisted, "The queued write must eventually reach disk")
+  }
+}
+
+private final class SnapshotWriteGate: @unchecked Sendable {
+  let entered = DispatchSemaphore(value: 0)
+  let released = DispatchSemaphore(value: 0)
+  private let lock = NSLock()
+  private var count = 0
+
+  func beforeWrite() {
+    let first = lock.withLock {
+      count += 1
+      return count == 1
+    }
+    if first {
+      entered.signal()
+      released.wait()
+    }
+  }
+
+  func writes() -> Int { lock.withLock { count } }
+}
+
+@Suite struct PersistenceCoalescingTests {
+  @Test func blockedWritesRetainOnlyTheLatestPendingSnapshot() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let path = directory.appendingPathComponent("snapshot.json").path
+    let gate = SnapshotWriteGate()
+    PersistenceWriter.setBeforeQueuedWrite { candidate in
+      if candidate == path { gate.beforeWrite() }
+    }
+    defer {
+      gate.released.signal()
+      PersistenceWriter.setBeforeQueuedWrite { _ in }
+      try? FileManager.default.removeItem(at: directory)
+    }
+
+    PersistenceWriter.persist(path: path, data: Data("0".utf8))
+    let started = await withCheckedContinuation { continuation in
+      DispatchQueue.global().async {
+        continuation.resume(returning: gate.entered.wait(timeout: .now() + 5) == .success)
+      }
+    }
+    #expect(started)
+    for value in 1...1000 { PersistenceWriter.persist(path: path, data: Data("\(value)".utf8)) }
+    gate.released.signal()
+    await PersistenceWriter.waitForPendingWrites()
+
+    #expect(gate.writes() == 2)
+    #expect(try String(contentsOfFile: path, encoding: .utf8) == "1000")
   }
 }
